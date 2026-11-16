@@ -4,6 +4,10 @@ Date: 2026-11-17 (system time). Scope: the 94 packages pinned in [../requirement
 
 **This is an engineering inventory, not legal advice.** It records what each package *declares* in its own metadata. It does not replace reading the license texts, and nobody here has checked patents, trademarks or the licenses of anything a package downloads at run time.
 
+## This project's own license
+
+PrintLabInterface is released under the PolyForm Noncommercial License 1.0.0 (see [../LICENSE](../LICENSE)), chosen by the owner on 2026-11-17. The text is the official 1.0.0 text, checked against the published file. Anyone who passes the software on must keep the `Required Notice:` line at the top of that file, which carries the owner's name. Commercial use is not granted by it; the owner is contacted for a separate license. It contains no code or documentation copied from PrintLab (also PolyForm Noncommercial 1.0.0); it only calls PrintLab at run time. This license covers this project's own files only. The packages in the lock keep their own licenses, listed below. All of them are permissive or weak-copyleft, so none of them stops this project from using a noncommercial license.
+
 ## What was checked
 
 - Every distribution in the project's virtual environment was read through `importlib.metadata`: the `License-Expression` field, then the `License` field, then the `License ::` classifiers.
