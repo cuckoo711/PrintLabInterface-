@@ -31,9 +31,11 @@ def test_service_creates_its_own_data_and_never_a_printlab_path(settings):
     assert "PrintLab" not in str(settings.db_path.relative_to(settings.data_dir.parent))
 
 
-def test_audit_trail_records_startup(settings):
-    with TestClient(create_app(settings)) as client:
-        rows = client.get("/api/audit").json()
+def test_audit_trail_records_startup_and_needs_the_admin_token(settings):
+    app = create_app(settings)
+    with TestClient(app) as client:
+        assert client.get("/api/audit").status_code == 401
+        rows = client.get("/api/audit", headers={"x-admin-token": app.state.admin_token}).json()
     assert rows and rows[0]["action"] == "startup"
 
 

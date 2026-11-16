@@ -7,8 +7,11 @@
 
 ## 0. 快速恢复（先读这一节）
 
-- 当前位置：**P0、P1 全部完成并通过 G1–G4。下一阶段 P2（供应商与模型）。** P2 的真实供应商调用需要用户自己填入 API key，开始 P2 前要先问用户。
-- 最近一次 G1–G4 实测（P1 验收，2026-11-17，**sidecar 运行中与真正停掉后各测一次**）：G1 PrintLab `git status` 为空；G2 pytest 446 通过 / 42 跳过 / 7 失败，与基线一致（同样 7 个符号链接用例）；G3 `verify_onboarding` ok:true、`/api/health` ok:true、`doctor` 四工具可用且 `missing_context` 为空；G4 摘除 sidecar（确认 8019 无监听、无 printlab_interface 进程）后 G1–G3 仍全部通过，反向实测 sidecar 在 `PLI_PRINTLAB_ROOT=""` 且 PrintLab 地址不可达时仍能启动并返回 `/healthz` ok。**踩过的坑**：`kill $!` 在 Windows 下没有真正结束 uvicorn 子进程，必须用 PowerShell `Stop-Process` 并复核端口，否则 G4 是假的（本次第一轮 G4 数据因此作废并重测）。
+- 当前位置：**P0、P1、P2-a 全部完成并通过 G1–G4。P2-b（真实供应商调用）被阻塞：需要用户自己录入 API key。** 之后是 P3（代理与聊天台）。
+- **P2-b 怎么做**：用户启动 sidecar（`python -m printlab_interface`，在 PrintLabInterface 目录用 `.venv`），读取 `data/admin_token`（仅当前用户可读），用请求头 `x-admin-token` 调 `POST /api/providers` 建供应商、`POST /api/providers/{prefix}/keys` 录入 key，再 `POST /api/chat` 测试。**key 不要贴进对话。** 我不接触 key，也不会替用户发真实请求，除非用户明确要求。
+- **P2-a 的状态**：模型调用全部用假的 litellm 可调用对象测试，**没有任何真实供应商请求被验证**（流式输出、工具调用格式、结构化输出在真实供应商上的表现都未知）。
+- P2-a 的 G1–G4（2026-11-17）：sidecar 运行中跑 PrintLab 全套（446/42/7、`verify_onboarding` ok、PrintLab `git status` 空），随后真正停掉（同一条命令里先断言 8019 无监听、无进程，否则中止），再测一遍结果相同。
+- 上一次（P1 验收）的完整记录：G1 PrintLab `git status` 为空；G2 pytest 446 通过 / 42 跳过 / 7 失败，与基线一致（同样 7 个符号链接用例）；G3 `verify_onboarding` ok:true、`/api/health` ok:true、`doctor` 四工具可用且 `missing_context` 为空；G4 摘除 sidecar（确认 8019 无监听、无 printlab_interface 进程）后 G1–G3 仍全部通过，反向实测 sidecar 在 `PLI_PRINTLAB_ROOT=""` 且 PrintLab 地址不可达时仍能启动并返回 `/healthz` ok。**踩过的坑**：`kill $!` 在 Windows 下没有真正结束 uvicorn 子进程，必须用 PowerShell `Stop-Process` 并复核端口，否则 G4 是假的（本次第一轮 G4 数据因此作废并重测）。
 - P0-3 结论：**采用 LiteLLM + LangGraph，进入 P1**；详见 `docs/SPIKE_P0_3.md`。注意：模型调用只用了 `mock_response`，**没有任何真实供应商调用被验证**。
 - **必读的坑**：调用 PrintLab CLI 时，子进程环境变量白名单太窄会导致"退出码 0 但输出为空"，并在当前工作目录创建名为 `%SystemDrive%` 的垃圾目录，使 PrintLab 的 `git status` 变脏（违反 G1）。已在临时目录复现并确认因果，白名单必须包含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等（完整清单见 `docs/spike_p0_3.py` 的 `ENV_ALLOW`），子进程 `cwd` 不得设为 PrintLab 根。
 - 下一步动作：P0-4 复核 G1–G4；然后进入 P1（只读适配器），按 `docs/SPIKE_P0_3.md` §5 的四条要求实现。
@@ -186,11 +189,16 @@ E:\MyProjet\PrintLabInterface\
 ├─ docs\SPIKE_P0_3.md、spike_p0_3.py   P0-3 结论与可重跑脚本
 ├─ src\printlab_interface\
 │   ├─ __init__.py（版本 0.1.0）  __main__.py  app.py  config.py  db.py  redact.py
+│   ├─ secrets.py                    DPAPI 加密（Windows）；其他平台需 PLI_SECRET_KEY；绝不明文
+│   ├─ security.py                   admin token（43 字符，data/admin_token）+ Host 白名单中间件
+│   ├─ fsprivate.py                  把文件 ACL 收窄到当前用户+SYSTEM（chmod 在 NTFS 上无效）
 │   ├─ adapters\printlab\            ★ 唯一允许知道 PrintLab 的地方：policy.py runner.py http.py adapter.py
-│   └─ providers\ agents\ tools\ workflows\   仍是空包（P2 起填充）
+│   ├─ providers\                    _litellm.py（唯一 import litellm 的地方）model_ref.py model_card.py
+│   │                                key_pool.py store.py gateway.py api.py
+│   └─ agents\ tools\ workflows\      仍是空包（P3 起填充）
 ├─ config\agents\  config\workflows\          空
-├─ tests\                           conftest.py test_policy.py test_runner.py test_app.py（90 个）
-└─ data\                            interface.db、run\（运行时产生，已 gitignore）
+├─ tests\                           conftest、test_policy/runner/app/providers_core/gateway_api/fsprivate（共 167 个）
+└─ data\                            interface.db、admin_token、run\（运行时产生，已 gitignore）
 ```
 
 ---
@@ -264,7 +272,8 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P0-3 | 已完成 | Spike：LiteLLM + LangGraph 两节点图 | 已跑通（模型调用仅 mock）；结论见 `docs/SPIKE_P0_3.md`：采用 LiteLLM + LangGraph |
 | P0-4 | 已完成 | 复核 G1 到 G4 | 四项实测通过，见 §0 |
 | P1 | 已完成 | 骨架与只读适配器（见 §4.1） | 90 个单测通过；实服务对真实 PrintLab 读到 H2C 状态；G1–G4 通过 |
-| P2 | 中 | 供应商与模型：CRUD、加密存储、key 池与失败分类、连通测试、模型卡三层合并、调用封装（取消、推理档位、输出上限、结构化输出）、用量记录 | 用户填入 key 后 OpenAI/Claude/DeepSeek 各完成一次真实调用；key 不出现在日志；G1–G4 |
+| P2-a | 已完成 | 供应商 CRUD、DPAPI 加密存储、key 池与失败分类、模型卡三层合并、调用封装（输出上限、推理档位、结构化输出、用量与成本）、管理 API、admin token 与 Host 校验 | 167 个测试通过；G1–G4 通过；实服务验证：无 token 401、错误 Host 400、假 key 不在磁盘明文出现 |
+| P2-b | **阻塞（需用户）** | 真实供应商连通测试 | 用户录入 key 后，OpenAI/Claude/DeepSeek 各完成一次真实调用；key 不出现在日志。**尚缺：流式输出、取消、真实工具调用格式、`/api/chat` 的流式版本（留到 P3）** |
 | P3 | 中 | 代理与聊天台：角色定义文件 + 权限天花板；工具网关（读、写文件类白名单）；Agent 循环；SSE 聊天前端；审计页；只读搜索工具 | Sarah、Mike 可对话并调用 status/materials/context；越权调用被拒并记录；会话可恢复；G1–G4 |
 | P4 | 中 | 工作流与协同：显式状态机（需求到复盘）、"待人选择"与"待批准"硬停点、SQLite 邮箱、只读巡检角色、定时触发 | 一次完整小物件流程跑到"待批准"为止；中途杀进程可恢复；重放不重复建项目；G1–G4 + 无越权文件改动 |
 | P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
@@ -313,3 +322,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：创建本文件。记录 PrintLab 初始化、H2C 接入、NarraFork 调研、方案 A/Python/P0 决策、P0-1 与 P0-2 完成状态。
 - 2026-11-17：P0-3 Spike 完成（`docs/SPIKE_P0_3.md`、`docs/spike_p0_3.py`）。发现并复现环境变量白名单过窄会产生 `%SystemDrive%` 垃圾目录污染 PrintLab 的 git 状态；已清理，G1 恢复。P0-4 完成，G1–G4 通过，P0 收尾。
 - 2026-11-17：P1 完成。新增 config、redact、db、app、`adapters/printlab/{policy,runner,http,adapter}`，90 个测试通过；实服务验证读取真实 PrintLab 且不改动其 git 状态；G1–G4 通过。依赖 litellm、langgraph 写入 `pyproject.toml`（带上限），尚无锁定文件。
+- 2026-11-17：P2-a 完成。新增 secrets（DPAPI）、security（admin token、Host 校验）、fsprivate（ACL 收窄）、providers/{_litellm,model_ref,model_card,key_pool,store,gateway,api}；167 个测试通过；G1–G4 通过。P2-b 阻塞于用户录入 key。
+
+## 10. 踩过的坑（后续务必先读）
+1. **子进程环境白名单太窄**：`printlab status` 退出码 0 但输出为空，并在 cwd 下造出名为 `%SystemDrive%` 的目录。白名单必须含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等，子进程 cwd 用 `data/run`，每次调用前后比对 PrintLab 的 `git status`。
+2. **`kill $!` 杀不掉 uvicorn**：必须 `Stop-Process` 并复核端口。验收 G4 时在同一条命令里先断言 8019 无监听、无 `printlab_interface` 进程，否则中止。
+3. **用 Python 往 INDEX.md 写含反斜杠的文本会被转义**（`\a` 变响铃字符、`\n` 变字面量）。改文档用编辑工具，或带引号分隔符的 heredoc（`<<'EOF'`）。
+4. **litellm 默认在 import 时联网拉价格表**（实测会连本机代理 127.0.0.1:7890）。必须在首次 import 前设 `LITELLM_LOCAL_MODEL_COST_MAP=True`，所以全项目只通过 `providers/_litellm.py` 引入它，有测试断言 import 时 0 次外连。
+5. **chmod 在 NTFS 上不起作用**：新建文件默认继承"Users 可读"。用 `fsprivate.make_private`。且不能用 `Set-Acl`（需要 SeSecurityPrivilege），用 `[System.IO.File]::SetAccessControl`。
+6. **中文 Windows 控制台输出是 GBK**：`subprocess(text=True)` 按 UTF-8 解码会让读线程崩溃、`stderr` 变 None。读字节后宽容解码。
+7. **FastAPI 默认的 422 响应会回显被拒绝的值（`input` 字段）**：对 API key 字段这等于把密钥送回调用方。已用自定义 `RequestValidationError` 处理器去掉。
+8. **pytest 里 PrintLab 有 7 个符号链接用例必失败**（`WinError 1314`），是基线的一部分，不要当成回归。
+9. `printlab history` 命令会刷新 `Library/References/PrintHistory` 缓存文件，所以在 policy 里归为 WRITE 而不是 READ。
+10. 后台 `Bash` 启动的服务，系统会报"unexpectedly exited (exit code 127)"，这是后台任务被 Stop 之后的通知，不代表服务崩溃；以端口监听和进程为准。
+
+## 11. 已知缺口（尚未做，不要当成已完成）
+- 没有真实供应商调用；没有流式输出；没有取消；没有工具调用循环（P3）。
+- 写类 PrintLab 命令（handoff、new、build 等）只有单测，没有对真实 PrintLab 实跑。
+- litellm、langgraph 没有锁定文件；许可只做了元数据粗筛。
+- admin token 只保护 API，没有用户账号体系；服务只绑 127.0.0.1。
+- 用量只记在审计表里（token 数、耗时），还没有预算上限与告警。
+- `docs/spike_p0_3.py` 里的环境白名单是旧版，正式版在 `adapters/printlab/runner.py`。
