@@ -24,6 +24,7 @@ _LITELLM_PREFIX = {
     "openrouter": "openrouter", "ollama": "ollama", "openai_compatible": "openai",
 }
 _REASONING = {"none", "low", "medium", "high"}
+MAX_TOOLS = 32
 MAX_ATTEMPTS = 3
 MAX_MESSAGES = 200
 MAX_TOTAL_CHARS = 400_000
@@ -46,6 +47,7 @@ class CallResult:
     finish_reason: str | None
     cost_usd: float | None = None
     warnings: list[str] = field(default_factory=list)
+    tool_calls: list[dict] = field(default_factory=list)  # [{"id", "name", "arguments"}]
 
 
 def _status_of(exc: Exception) -> int | None:
@@ -61,6 +63,24 @@ def _retry_after(exc: Exception) -> float | None:
         return None
 
 
+MAX_TOOL_ARGS_CHARS = 8_000
+
+
+def _tool_calls_of(message: Any) -> list[dict]:
+    """Normalise the provider's tool calls. Arguments stay a string; the tool gateway parses and validates them."""
+    out: list[dict] = []
+    for call in getattr(message, "tool_calls", None) or []:
+        fn = getattr(call, "function", None)
+        name = getattr(fn, "name", None)
+        args = getattr(fn, "arguments", None)
+        call_id = getattr(call, "id", None)
+        if not isinstance(name, str) or not isinstance(call_id, str) or not call_id:
+            continue  # a malformed call is dropped rather than guessed at
+        args = args if isinstance(args, str) else "{}"
+        out.append({"id": call_id[:80], "name": name[:80], "arguments": args[:MAX_TOOL_ARGS_CHARS]})
+    return out
+
+
 def _validate_messages(messages: list[dict]) -> None:
     if not isinstance(messages, list) or not messages or len(messages) > MAX_MESSAGES:
         raise GatewayError("messages must be a non-empty list (max %d)" % MAX_MESSAGES)
@@ -71,6 +91,10 @@ def _validate_messages(messages: list[dict]) -> None:
         content = m.get("content")
         if content is not None and not isinstance(content, (str, list)):
             raise GatewayError("message content must be text or a list of parts")
+        if m["role"] == "tool" and not (isinstance(m.get("tool_call_id"), str) and m["tool_call_id"]):
+            raise GatewayError("a tool message needs a tool_call_id")
+        if m["role"] != "tool" and content is None and not m.get("tool_calls"):
+            raise GatewayError("a message needs content unless it carries tool calls")
         total += len(content) if isinstance(content, str) else len(str(content))
     if total > MAX_TOTAL_CHARS:
         raise GatewayError("request too large")
@@ -102,9 +126,11 @@ class Gateway:
     def complete(
         self, model_value: str, messages: list[dict], *, session: str | None = None, max_tokens: int | None = None,
         temperature: float | None = None, reasoning_effort: str | None = None, timeout_s: float = 60.0,
-        response_format: dict | None = None, mock_response: Any = None,
+        response_format: dict | None = None, mock_response: Any = None, tools: list[dict] | None = None,
     ) -> CallResult:
         _validate_messages(messages)
+        if tools is not None and (not isinstance(tools, list) or len(tools) > MAX_TOOLS):
+            raise GatewayError(f"tools must be a list of at most {MAX_TOOLS} definitions")
         try:
             ref = parse(model_value)
         except ModelRefError as exc:
@@ -150,7 +176,7 @@ class Gateway:
                 started = time.perf_counter()
                 try:
                     response = self._call_once(provider, ref.model, messages, entry, conn, out_cap, temperature,
-                                               reasoning_effort, timeout_s, response_format, mock_response)
+                                               reasoning_effort, timeout_s, response_format, mock_response, tools)
                 except Exception as exc:  # noqa: BLE001 - classified below
                     status = _status_of(exc)
                     fault: Fault = (self.pool.report_failure(ref.prefix, entry, status, str(exc), _retry_after(exc))
@@ -174,7 +200,7 @@ class Gateway:
         finally:
             conn.close()
 
-    def _call_once(self, provider, model, messages, entry, conn, out_cap, temperature, reasoning_effort, timeout_s, response_format, mock_response):
+    def _call_once(self, provider, model, messages, entry, conn, out_cap, temperature, reasoning_effort, timeout_s, response_format, mock_response, tools=None):
         kwargs: dict[str, Any] = {
             "model": f"{_LITELLM_PREFIX[provider.litellm_kind]}/{model}", "messages": messages,
             "timeout": timeout_s, "num_retries": 0,  # retries are the pool's job, so cost and key choice stay visible
@@ -191,6 +217,8 @@ class Gateway:
             kwargs["reasoning_effort"] = reasoning_effort
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools:
+            kwargs["tools"] = tools
         if mock_response is not None:
             kwargs["mock_response"] = mock_response
         return self._call(**kwargs)
@@ -209,4 +237,5 @@ class Gateway:
             text=choice.message.content or "", model=model, key_label=(entry.id if entry else "keyless"), attempts=attempt,
             usage={"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": getattr(usage, "total_tokens", None)},
             finish_reason=getattr(choice, "finish_reason", None), cost_usd=cost, warnings=list(card.warnings),
+            tool_calls=_tool_calls_of(choice.message),
         )

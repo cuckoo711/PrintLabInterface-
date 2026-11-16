@@ -100,3 +100,9 @@ def test_http_dangerous_or_unlisted_paths_are_refused(path):
 @pytest.mark.parametrize("path", ["/api/health", "/api/overview", "/api/projects/P001", "/api/device?x=1", "/api/documents/a/b.md"])
 def test_http_read_paths_are_allowed(path):
     check_http("GET", path)
+
+
+@pytest.mark.parametrize("token", ["H2C --execute", "--execute=1", "x --send y", "a\nb", "a\x00b", "p\r"])
+def test_flags_hidden_inside_a_value_and_control_characters_are_refused(token):
+    with pytest.raises(PolicyError):
+        check_cli(["dispatch-plan", "--model", token])

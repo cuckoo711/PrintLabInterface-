@@ -165,8 +165,11 @@ def check_cli(argv: list[str], *, allow_write: bool = False) -> Verdict:
         raise PolicyError(f"'{argv[0]}' writes files and write access was not requested")
     # No argument may smuggle a dangerous flag. Execution flags are never passed by the sidecar.
     for token in argv[1:]:
-        if token in {"--execute", "--send", "--start"}:
-            raise PolicyError(f"flag {token} is permanently refused")
+        # Also catches a flag hidden inside a longer value, such as "H2C --execute".
+        if any(word in {"--execute", "--send", "--start"} for word in token.replace("=", " ").split()):
+            raise PolicyError(f"flag {token.strip()[:40]!r} is permanently refused")
+        if any(ord(c) < 32 for c in token):
+            raise PolicyError("control characters in an argument are refused")
     return verdict
 
 

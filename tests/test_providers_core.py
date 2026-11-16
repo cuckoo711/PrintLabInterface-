@@ -197,3 +197,12 @@ def test_keyed_fallback_refuses_without_a_key(monkeypatch):
     monkeypatch.delenv("PLI_SECRET_KEY", raising=False)
     with pytest.raises(secrets.SecretError, match="PLI_SECRET_KEY"):
         secrets.seal("sk-anything-123456789")
+
+
+@pytest.mark.parametrize("bad", ["abc\n", "abc\r\n", "abc\x00", "ab\nc"])
+def test_prefix_validation_rejects_trailing_newline_and_control_characters(bad):
+    # `$` in a regex matches before a trailing newline; fullmatch must be used.
+    with pytest.raises(ModelRefError):
+        validate_prefix(bad)
+    with pytest.raises(ModelRefError):
+        parse(f"{bad}:model")

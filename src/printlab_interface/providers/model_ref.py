@@ -26,7 +26,7 @@ class ModelRef:
 
 
 def validate_prefix(prefix: str) -> str:
-    if not _PREFIX.match(prefix or ""):
+    if not _PREFIX.fullmatch(prefix or ""):
         raise ModelRefError("provider prefix must be 1-32 chars: lowercase letters, digits, '-' or '_', starting with a letter")
     return prefix
 
