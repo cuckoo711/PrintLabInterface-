@@ -291,7 +291,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P3-4 | 已完成 | 会话存储（`agents/sessions.py`，只存正文与元数据，不存工具原始结果）、`agents/manager.py`（单会话单运行、全局 3 个并发、事件队列有界、重启后把遗留 running 标成 interrupted）、`agents/api.py`（`/api/agents`、`/api/sessions`、`POST /api/sessions/{id}/run` 的 SSE、`/api/runs/{id}/cancel`）、`web/`（`/chat` 单页：无构建链，CSP `default-src 'none'`，无内联脚本，令牌只在内存，`textContent` 渲染） | 379 个测试；管理器与页面防线做过变异检查；真浏览器（Edge+Playwright）冒烟 24/24，连跑 3 次；G1–G4 两种状态通过 |
 | P3-5 | 已完成 | 两个只读"原生"工具（`tools/native.py`，不走 PrintLab CLI）：`printlab_docs_search` 只搜 PrintLab `docs/*.md`（一层目录、跳过符号链接、单文件 1MB、最多 200 个文件、命中带文件与行号，不碰 `Context/` 和 `Runtime/`）；`web_fetch` 只访问 `PLI_WEB_ALLOW_HOSTS`（逗号分隔，**默认为空 = 工具关闭且不提供给模型**）里的主机：仅 https、无查询串/片段/账号、不跟随重定向、域名解析到非公网地址即拒绝、路径不许含 `%`、10 秒超时、正文 30 万字节、文本 8000 字符。结果同样包成 `<printlab-data>` | 52 个新测试（总 552 通过、1 跳过）；4 处防线做过变异检查（公网地址、重定向、主机白名单、符号链接）；发现并修了一处真漏洞（路径允许 `%` 时 `%2e%2e`、`%00` 能通过检查）；用真模型 mimo 实测 sarah 调用文档搜索并引用 `docs/PRINTING.md` 行号，PrintLab `git status` 仍为空 |
 | P4-a | 已完成 | 工作流引擎：`workflows/definition.py`（YAML，四种阶段 agent/evidence/human/handoff；证据命令必须是 `check_cli` 判定为只读的；模板只允许 `{project}`/`{brief}`/`{out:id}`，不用 `str.format`；整个文件任何问题即整体拒绝）、`workflows/engine.py`（LangGraph + 独立 SQLite 检查点 `data/workflow_checkpoints.db` + `workflow_runs` 表；start 以 request_id 幂等；answer 只收 yes/no 且只在 waiting；blocked/interrupted 可 retry；重启把 running 标为 interrupted）、`workflows/api.py`（`/api/workflows`、`/api/workflow-runs` 及 answer/retry/stop，全部需 admin token）、聊天台"工作流"面板、内置 `config/workflows/object-intake.yaml` | 501 个测试；引擎与 API 的关键防线逐一变异检查；浏览器冒烟 35 项；G1–G3 运行中与摘除后均通过 |
-| P4-b | **未做** | 原计划里的这几项**没有做**：SQLite 邮箱（Agent 间通信）、只读巡检角色、定时/事件触发、"一次完整小物件流程跑到待批准"。其中定时/事件触发需要无人值守调用模型（用户已表示 API 条款自行负责）。 | 需要用户先同意怎么做；见 §11 |
+| P4-b | 已完成（默认全关） | `automation/`：`mailbox.py`（SQLite 邮箱，写入脱敏、500 行上限、已读先丢）、`patrol.py`（**不调模型**的规则巡检：离线/未连接/遥测过期/FAILED·PAUSE/等待清盘/HMS 码，只在发现集合**变化**时发信）、`scheduler.py`（三层默认关：`PLI_SCHEDULER=1` 才启动；每个计划创建时 `enabled=0`；调模型的计划**必须同时给 `max_runs` 与 `max_total_tokens`**，没有默认值也没有"无限"，达到即自动关闭并发信；连续 3 次失败自动关；同一时间只跑一个；最多 20 个计划）、`api.py`（`/api/mailbox`、`/api/scheduler`、`/api/schedules` 增改删与手动运行，全部需 admin token）、`config/agents/patrol.md`（只读角色）。触发方式只有 interval 与 patrol_change（巡检发现变化后，agent 才跑，间隔当冷却）。**没有邮件收取（IMAP）**，"邮箱"指 Agent/调度到人的站内信箱 | 61 个新测试（总 614 通过）；9 处防线做过变异检查（全局开关、默认关闭、两个上限、变化才发信、失败连关、上限可选、启用已用尽的计划）；真实环境：巡检读到 H2C 的真实 HMS `050002000003000A` 并发信；真模型（mimo）跑了一次带上限计划（max_runs=1），自动关闭、第二次手动运行被拒；PrintLab `git status` 仍为空。**上限在两次运行之间检查**：已开始的运行不会被切断，实测一次带工具调用的运行用了约 6000 token（上限 3000），所以 token 上限要按"可能超出一次运行的用量"来定 |
 | P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
 | P6 | 部分完成 | **已做**：`requirements.lock`（带哈希；用它 `--require-hashes` 装进干净环境，501 测试全过、`pip check` 无冲突）、`docs/LICENSES.md`（逐组统计与需要留意的包：MPL-2.0 的 certifi/tqdm/orjson，带原生二进制且无许可文件的 sqlite-vec）。**未做**：Windows 服务化、别的机器上的安装验证、逐包核对许可文本、决定本项目许可 | 全新机器按文档可安装；许可清单完整 |
 
@@ -344,6 +344,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P4-a 完成（LangGraph Spike；工作流定义/引擎/HTTP 入口；聊天台工作流面板；`CallResult.truncated` 与 Agent 状态 `truncated`）；501 测试 + 浏览器冒烟 35 项；G1–G3 运行中/摘除后通过。P4-b 未做。
 - 2026-11-17：真项目端到端：建 P001 测试项目，object-intake 用真模型跑到人工确认点（先在 not_recorded 处正确阻塞，补记录后重试 0 次模型调用）；G1 保持为空。
 - 2026-11-17：P3-5 完成（文档搜索 + 受限网页抓取，网页工具默认关闭）；552 测试；真模型实测通过；修了路径 `%` 编码绕过。
+- 2026-11-17：P4-b 完成（站内邮箱、规则巡检、带硬上限的定时/事件触发，默认全关）；614 测试；真环境与真模型各验一次；token 上限为运行间检查（会超出一次）。
 - 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
 ## 10. 踩过的坑（后续务必先读）
@@ -400,7 +401,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 同一页面里令牌用输入框传入，**没有登录/会话机制**；任何拿到 `data/admin_token` 的本机进程都能调 API（文件已收紧到当前用户 + SYSTEM）。
 - 只有 mimo 一家做过真实验证；其他供应商的真实行为未知。
 - P4-b、P5 管理后台没开始（P3-5 已完成）。P6 只做了依赖锁定与许可清单（见上）；"全新机器按文档安装"只在本机用临时虚拟环境验证过，没有在别的机器上验证。
-- **P4-b 没做**：Agent 间 SQLite 邮箱、只读巡检角色、定时/事件触发、"完整小物件流程跑到待批准"。当前工作流只有一个内置的 `object-intake`，它的终点是"交接给人"，不涉及建模、切片、批准、发送。
+- **P4-b 已做（见 §7）；仍未做的**：IMAP 收信、Agent 之间互发消息（现在的信箱只通到人）、让计划触发工作流、"完整小物件流程跑到待批准"。当前工作流只有一个内置的 `object-intake`，它的终点是"交接给人"，不涉及建模、切片、批准、发送。
 - **工作流回答 yes 之后的交接阶段没有用真模型跑过**（到人工确认点为止已用真模型+真项目验证，见 §0）。
 - **工作流的检查点没有清理机制**：`data/workflow_checkpoints.db` 会一直增长；同一线程被两个进程同时恢复的情形没有测。
 - **`answer`/`retry` 的并发保护只在单进程内**（内存里的 `_busy` 集合）。多个 sidecar 进程指向同一个库时不安全；目前设计是单进程。

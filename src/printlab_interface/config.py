@@ -46,6 +46,10 @@ class Settings:
     # Hosts the web_fetch tool may contact. Empty (the default) means the tool is switched off.
     web_allow_hosts: frozenset[str] = frozenset()
 
+    # Unattended schedules. Off unless PLI_SCHEDULER=1; even then every schedule starts disabled.
+    scheduler_enabled: bool = False
+    scheduler_tick_s: float = 15.0
+
     agents_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "agents")
     workflows_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "workflows")
 
@@ -88,6 +92,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             cli_timeout_s=_int("PLI_CLI_TIMEOUT_S", 60, 1, 600),
             cli_max_output_bytes=_int("PLI_CLI_MAX_OUTPUT_BYTES", 1_000_000, 1024, 50_000_000),
             web_allow_hosts=parse_hosts(source.get("PLI_WEB_ALLOW_HOSTS")),
+            scheduler_enabled=source.get("PLI_SCHEDULER", "") == "1",
         )
     finally:
         if env is not None:

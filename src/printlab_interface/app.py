@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from . import __version__, db, redact, security, web
 from .adapters.printlab import PrintLabAdapter
 from .agents import api as agents_api
+from .automation import api as automation_api
+from .automation.scheduler import Scheduler
 from .agents.definition import load_dir
 from .agents.loop import AgentRunner
 from .agents.manager import RunManager
@@ -55,10 +57,15 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
         stopped = app.state.workflows_engine.recover()
         if stopped:
             log.warning("marked %d workflow run(s) from a previous process as interrupted", stopped)
+        app.state.scheduler = Scheduler(settings.db_path, app.state.agents, agent_runner, app.state.adapter.read_status,
+                                        enabled=settings.scheduler_enabled, tick_s=settings.scheduler_tick_s)
+        if app.state.scheduler.start():
+            log.warning("scheduler is ON (PLI_SCHEDULER=1); schedules run only after they are enabled one by one")
         log.info("admin token stored at %s (not logged)", settings.data_dir / security.TOKEN_FILE)
         try:
             yield
         finally:
+            app.state.scheduler.stop()
             app.state.adapter.close()
 
     app = FastAPI(title="PrintLabInterface", version=__version__, lifespan=lifespan)
@@ -94,5 +101,6 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
     app.include_router(providers_api.router)
     app.include_router(agents_api.router)
     app.include_router(workflows_api.router)
+    app.include_router(automation_api.router)
     app.include_router(web.router)
     return app
