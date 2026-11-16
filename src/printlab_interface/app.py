@@ -18,6 +18,7 @@ from .config import Settings, load_settings
 from .providers import api as providers_api
 from .providers.gateway import Gateway
 from .tools.gateway import ToolGateway
+from .tools.native import NativeTools
 from .workflows import api as workflows_api
 from .workflows.definition import load_dir as load_workflows
 from .workflows.engine import WorkflowEngine
@@ -40,7 +41,9 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
         app.state.adapter = adapter or PrintLabAdapter(settings)
         app.state.gateway = gateway or Gateway(settings.db_path)
         app.state.agents = load_dir(settings.agents_dir)
-        tool_gateway = ToolGateway(app.state.adapter.runner, audit_db=lambda: db.connect(settings.db_path))
+        docs_dir = settings.printlab_root / "docs" if settings.printlab_root else None
+        tool_gateway = ToolGateway(app.state.adapter.runner, audit_db=lambda: db.connect(settings.db_path),
+                                   native=NativeTools(docs_dir, settings.web_allow_hosts))
         agent_runner = AgentRunner(app.state.gateway, tool_gateway)
         app.state.runs = RunManager(settings.db_path, agent_runner)
         interrupted = app.state.runs.recover()

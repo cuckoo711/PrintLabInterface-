@@ -17,6 +17,7 @@ from typing import Any, Callable
 from .. import db
 from ..adapters.printlab.policy import PolicyError, check_cli
 from ..adapters.printlab.runner import PrintLabRunner, RunnerError
+from .native import NativeError, NativeTools
 from .registry import TOOLS, ToolArgError, ToolSpec, get
 
 MAX_RESULT_CHARS = 12_000
@@ -43,12 +44,16 @@ def _wrap(text: str) -> tuple[str, bool]:
 
 
 class ToolGateway:
-    def __init__(self, runner: PrintLabRunner | None, *, audit_db: Callable[[], sqlite3.Connection] | None = None):
+    def __init__(self, runner: PrintLabRunner | None, *, audit_db: Callable[[], sqlite3.Connection] | None = None,
+                 native: NativeTools | None = None):
         self.runner = runner
         self._audit_db = audit_db
+        self.native = native or NativeTools(None)
 
     def schemas(self, allowed: frozenset[str]) -> list[dict[str, Any]]:
-        return [TOOLS[n].schema_for_model() for n in sorted(allowed) if n in TOOLS]
+        # A native tool that is switched off on this installation is not offered to the model at all.
+        return [TOOLS[n].schema_for_model() for n in sorted(allowed)
+                if n in TOOLS and (not TOOLS[n].native or self.native.enabled(n))]
 
     def _audit(self, agent: str, tool: str, outcome: str, detail: str = "") -> None:
         if self._audit_db is None:
@@ -75,6 +80,8 @@ class ToolGateway:
         except ToolArgError as exc:
             self._audit(agent, tool_name, "refused", f"bad arguments: {exc}")
             return ToolOutcome(False, f"Error: {exc}", refused=True)
+        if spec.native:
+            return self._call_native(agent, spec, arguments)
         try:
             check_cli(argv, allow_write=allow_write and spec.tier == "write")
         except PolicyError as exc:
@@ -90,4 +97,17 @@ class ToolGateway:
             return ToolOutcome(False, f"Error: {str(exc)[:300]}")
         body, truncated = _wrap(json.dumps(result.data, ensure_ascii=False, separators=(",", ":")))
         self._audit(agent, tool_name, "ok", f"ms={result.duration_ms} truncated={truncated}")
+        return ToolOutcome(True, body, truncated=truncated)
+
+    def _call_native(self, agent: str, spec: ToolSpec, arguments: Any) -> ToolOutcome:
+        if spec.tier != "read":  # native tools are read-only by construction; refuse anything else
+            self._audit(agent, spec.name, "refused", "native tool is not read-only")
+            return ToolOutcome(False, "Error: refused.", refused=True)
+        try:
+            data = self.native.run(spec.name, arguments)
+        except (NativeError, ToolArgError) as exc:
+            self._audit(agent, spec.name, "error", str(exc)[:200])
+            return ToolOutcome(False, f"Error: {str(exc)[:300]}")
+        body, truncated = _wrap(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+        self._audit(agent, spec.name, "ok", f"truncated={truncated}")
         return ToolOutcome(True, body, truncated=truncated)

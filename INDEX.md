@@ -289,7 +289,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P3-2 | 已完成 | 角色定义（Markdown+YAML frontmatter）→ 能力天花板；非法即零工具；子级只能收窄 | 32 个测试；提示词安全规则经变异检查 |
 | P3-3 | 已完成 | Agent 循环：最大轮数、每轮/总工具数、总时限 180 秒、可取消、相同失败调用两次即停 | 30 个测试，关键防线均做过变异检查；端到端用 sarah 角色 + 脚本化假模型 + 真实 PrintLab 读工具 |
 | P3-4 | 已完成 | 会话存储（`agents/sessions.py`，只存正文与元数据，不存工具原始结果）、`agents/manager.py`（单会话单运行、全局 3 个并发、事件队列有界、重启后把遗留 running 标成 interrupted）、`agents/api.py`（`/api/agents`、`/api/sessions`、`POST /api/sessions/{id}/run` 的 SSE、`/api/runs/{id}/cancel`）、`web/`（`/chat` 单页：无构建链，CSP `default-src 'none'`，无内联脚本，令牌只在内存，`textContent` 渲染） | 379 个测试；管理器与页面防线做过变异检查；真浏览器（Edge+Playwright）冒烟 24/24，连跑 3 次；G1–G4 两种状态通过 |
-| P3-5 | 未开始 | 只读搜索工具（超时、截断、不递归、强制来源） | 有单测；不把搜索结果当指令 |
+| P3-5 | 已完成 | 两个只读"原生"工具（`tools/native.py`，不走 PrintLab CLI）：`printlab_docs_search` 只搜 PrintLab `docs/*.md`（一层目录、跳过符号链接、单文件 1MB、最多 200 个文件、命中带文件与行号，不碰 `Context/` 和 `Runtime/`）；`web_fetch` 只访问 `PLI_WEB_ALLOW_HOSTS`（逗号分隔，**默认为空 = 工具关闭且不提供给模型**）里的主机：仅 https、无查询串/片段/账号、不跟随重定向、域名解析到非公网地址即拒绝、路径不许含 `%`、10 秒超时、正文 30 万字节、文本 8000 字符。结果同样包成 `<printlab-data>` | 52 个新测试（总 552 通过、1 跳过）；4 处防线做过变异检查（公网地址、重定向、主机白名单、符号链接）；发现并修了一处真漏洞（路径允许 `%` 时 `%2e%2e`、`%00` 能通过检查）；用真模型 mimo 实测 sarah 调用文档搜索并引用 `docs/PRINTING.md` 行号，PrintLab `git status` 仍为空 |
 | P4-a | 已完成 | 工作流引擎：`workflows/definition.py`（YAML，四种阶段 agent/evidence/human/handoff；证据命令必须是 `check_cli` 判定为只读的；模板只允许 `{project}`/`{brief}`/`{out:id}`，不用 `str.format`；整个文件任何问题即整体拒绝）、`workflows/engine.py`（LangGraph + 独立 SQLite 检查点 `data/workflow_checkpoints.db` + `workflow_runs` 表；start 以 request_id 幂等；answer 只收 yes/no 且只在 waiting；blocked/interrupted 可 retry；重启把 running 标为 interrupted）、`workflows/api.py`（`/api/workflows`、`/api/workflow-runs` 及 answer/retry/stop，全部需 admin token）、聊天台"工作流"面板、内置 `config/workflows/object-intake.yaml` | 501 个测试；引擎与 API 的关键防线逐一变异检查；浏览器冒烟 35 项；G1–G3 运行中与摘除后均通过 |
 | P4-b | **未做** | 原计划里的这几项**没有做**：SQLite 邮箱（Agent 间通信）、只读巡检角色、定时/事件触发、"一次完整小物件流程跑到待批准"。其中定时/事件触发需要无人值守调用模型（用户已表示 API 条款自行负责）。 | 需要用户先同意怎么做；见 §11 |
 | P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
@@ -343,6 +343,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P3-4 完成（会话存储、SSE 聊天 API、`/chat` 页面、真浏览器冒烟）；用用户提供的 mimo key 做了 3 次真实调用；测试 379 个；修复 2 个冒烟发现的缺陷与 key 回显泄露风险。
 - 2026-11-17：P4-a 完成（LangGraph Spike；工作流定义/引擎/HTTP 入口；聊天台工作流面板；`CallResult.truncated` 与 Agent 状态 `truncated`）；501 测试 + 浏览器冒烟 35 项；G1–G3 运行中/摘除后通过。P4-b 未做。
 - 2026-11-17：真项目端到端：建 P001 测试项目，object-intake 用真模型跑到人工确认点（先在 not_recorded 处正确阻塞，补记录后重试 0 次模型调用）；G1 保持为空。
+- 2026-11-17：P3-5 完成（文档搜索 + 受限网页抓取，网页工具默认关闭）；552 测试；真模型实测通过；修了路径 `%` 编码绕过。
 - 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
 ## 10. 踩过的坑（后续务必先读）
@@ -388,7 +389,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - admin token 只保护 API，没有用户账号体系；服务只绑 127.0.0.1。
 - 用量只记在审计表里（token 数、耗时），还没有预算上限与告警。
 - `docs/spike_p0_3.py` 里的环境白名单是旧版，正式版在 `adapters/printlab/runner.py`。
-- P3-4/P3-5 未做：没有会话存储、没有 HTTP 入口去跑 Agent、没有聊天台页面、没有流式输出、没有搜索工具。`AgentRunner.stream()` 目前是"跑完再依次吐事件"，不是真流式。
+- P3-4/P3-5 未做：没有会话存储、没有 HTTP 入口去跑 Agent、没有聊天台页面、没有流式输出。（搜索工具已在 P3-5 完成）`AgentRunner.stream()` 目前是"跑完再依次吐事件"，不是真流式。
 - Agent 现在只有只读工具；`Ceiling.allow_write` 恒为 False，写类工具（handoff 等）一个都没注册。
 - 角色文件里的 `model` 目前留空，运行时必须传 `model`；还没有"默认模型"配置。
 - 没有对话长度压缩；历史只截最近 60 条。
@@ -398,7 +399,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 页面没有做可访问性的人工验证（只有标签、live region、键盘焦点样式的静态检查与一次真浏览器冒烟）；不能据此宣称符合 WCAG，完整验证需要辅助技术手工测试。
 - 同一页面里令牌用输入框传入，**没有登录/会话机制**；任何拿到 `data/admin_token` 的本机进程都能调 API（文件已收紧到当前用户 + SYSTEM）。
 - 只有 mimo 一家做过真实验证；其他供应商的真实行为未知。
-- P4-b、P5 管理后台、P3-5 搜索工具都没开始。P6 只做了依赖锁定与许可清单（见上）；"全新机器按文档安装"只在本机用临时虚拟环境验证过，没有在别的机器上验证。
+- P4-b、P5 管理后台没开始（P3-5 已完成）。P6 只做了依赖锁定与许可清单（见上）；"全新机器按文档安装"只在本机用临时虚拟环境验证过，没有在别的机器上验证。
 - **P4-b 没做**：Agent 间 SQLite 邮箱、只读巡检角色、定时/事件触发、"完整小物件流程跑到待批准"。当前工作流只有一个内置的 `object-intake`，它的终点是"交接给人"，不涉及建模、切片、批准、发送。
 - **工作流回答 yes 之后的交接阶段没有用真模型跑过**（到人工确认点为止已用真模型+真项目验证，见 §0）。
 - **工作流的检查点没有清理机制**：`data/workflow_checkpoints.db` 会一直增长；同一线程被两个进程同时恢复的情形没有测。

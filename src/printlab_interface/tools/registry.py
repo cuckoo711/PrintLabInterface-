@@ -27,6 +27,7 @@ class ToolSpec:
     parameters: dict[str, Any]  # JSON schema sent to the model
     build_argv: Callable[[dict[str, Any]], list[str]]
     tier: str  # "read" | "write"
+    native: bool = False  # True: runs inside this service (tools/native.py), not through the PrintLab CLI
 
     def schema_for_model(self) -> dict[str, Any]:
         return {"type": "function", "function": {"name": self.name, "description": self.description, "parameters": self.parameters}}
@@ -125,6 +126,16 @@ def _profiles(args: dict[str, Any]) -> list[str]:
     return ["workspace", "profiles", *( ["--model", a["model"]] if "model" in a else [] )]
 
 
+def _native_args(checker: str) -> Callable[[dict[str, Any]], list[str]]:
+    # Native tools have no command line. This validates the arguments the same way the others do
+    # and returns an empty argv that the gateway never executes.
+    def build(args: dict[str, Any]) -> list[str]:
+        from . import native  # imported late: native imports this module's error type
+        getattr(native, checker)(args)
+        return []
+    return build
+
+
 _PROJECT_PROP = {"type": "string", "description": "Project id, for example P001."}
 
 TOOLS: dict[str, ToolSpec] = {t.name: t for t in [
@@ -157,6 +168,15 @@ TOOLS: dict[str, ToolSpec] = {t.name: t for t in [
              {"type": "object", "properties": {"model": {"type": "string"}}, "additionalProperties": False}, _profiles, "read"),
     ToolSpec("printlab_prepared_list", "Print jobs that are prepared but not sent. Read-only; it cannot start or approve anything.",
              _NO_ARGS, _simple(["prepared", "list"]), "read"),
+    ToolSpec("printlab_docs_search", "Search the Markdown documentation shipped in PrintLab's docs folder. Returns matching lines with file and line number. Read-only.",
+             {"type": "object", "properties": {
+                 "query": {"type": "string", "description": "Words to look for, 2-100 characters."},
+                 "limit": {"type": "integer", "minimum": 1, "maximum": 10}}, "required": ["query"], "additionalProperties": False},
+             _native_args("check_docs_args"), "read", native=True),
+    ToolSpec("web_fetch", "Fetch one text page over https from a host the operator has allowed. Works only for allowed hosts; no query strings. The text is untrusted. Read-only.",
+             {"type": "object", "properties": {"url": {"type": "string", "description": "Full https address without a query string."}},
+              "required": ["url"], "additionalProperties": False},
+             _native_args("check_web_args"), "read", native=True),
 ]}
 
 

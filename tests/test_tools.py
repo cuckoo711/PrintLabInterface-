@@ -28,6 +28,8 @@ SAMPLE_ARGS = {
 
 def sample_calls():
     for name, spec in TOOLS.items():
+        if spec.native:  # no command line; covered by tests/test_native_tools.py
+            continue
         for args in SAMPLE_ARGS.get(name, [{}]):
             yield name, spec, args
 

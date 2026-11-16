@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .tools.native import parse_hosts
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PRINTLAB_ROOT = REPO_ROOT.parent / "PrintLab"
 
@@ -40,6 +42,9 @@ class Settings:
     # Extra Host header values to accept. Empty in production. Only test fixtures set it,
     # because Starlette's test client sends "Host: testserver".
     extra_hosts: frozenset[str] = frozenset()
+
+    # Hosts the web_fetch tool may contact. Empty (the default) means the tool is switched off.
+    web_allow_hosts: frozenset[str] = frozenset()
 
     agents_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "agents")
     workflows_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "workflows")
@@ -82,6 +87,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             printlab_url=source.get("PLI_PRINTLAB_URL", "http://127.0.0.1:8018").rstrip("/"),
             cli_timeout_s=_int("PLI_CLI_TIMEOUT_S", 60, 1, 600),
             cli_max_output_bytes=_int("PLI_CLI_MAX_OUTPUT_BYTES", 1_000_000, 1024, 50_000_000),
+            web_allow_hosts=parse_hosts(source.get("PLI_WEB_ALLOW_HOSTS")),
         )
     finally:
         if env is not None:
