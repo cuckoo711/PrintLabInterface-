@@ -7,12 +7,12 @@
 
 ## 0. 快速恢复（先读这一节）
 
-- 当前位置：**P0、P1、P2-a、P3-1..5、P4-a、P4-b、P5 已完成；P6 部分完成。** 可用：聊天台 `http://127.0.0.1:8019/chat`、管理后台 `/admin`（令牌在 `data/admin_token`）。角色 sarah、mike、project、patrol 都只读；工作流 `object-intake`；巡检/定时/信箱（**默认全关**，见 §7 P4-b）；`web_fetch` 默认关（`PLI_WEB_ALLOW_HOSTS` 为空）。**仍需用户提供的只有一件**：(e) OpenAI/Claude/DeepSeek 的 key（才能做真实验证）；项目许可已定为 PolyForm Noncommercial 1.0.0。另有 /tmp/ref/NarraFork 克隆去留、是否开启 Windows 开发者模式（见 §5.1）。
-- **工作流已在真项目上用真模型跑到人工确认点**（2026-11-17）：经 PrintLab 自己的 CLI 建了测试项目 `P001`（目录 `Project/P001-TEST-object-intake-smoke`，在 PrintLab 的 .gitignore 内，PrintLab `git status` 仍为空）。run `59a3aca093224f35`（`mimo:mimo-v2.6-flash`）：需求阶段写出清单后，证据阶段因 `constraints show` 为 `not_recorded` 而 `blocked`（正确）；用 `printlab constraints capture P001 --expect-sha missing` 补记录后 `retry`，**重试 0 次模型调用**（只重跑证据阶段），进入 `waiting/go_ahead`，**停在人工确认点，没有替用户回答**。**尚未做的：回答 yes 之后的交接阶段没有用真模型跑过。** 测试项目 P001 与那份记录是 TEST 数据，保留还是删除由用户决定，我没有删。run 的检查点在 `data/workflow_checkpoints.db`，重启 sidecar 后仍可在聊天台继续回答。
+- 当前位置：**P0、P1、P2-a、P3-1..5、P4-a、P4-b、P5 已完成；P6 部分完成。** 可用：聊天台 `http://127.0.0.1:8019/chat`、管理后台 `/admin`（令牌在 `data/admin_token`）。角色 sarah、mike、project、patrol 都只读；工作流 `object-intake`；巡检/定时/信箱（**默认全关**，见 §7 P4-b）；`web_fetch` 默认关（`PLI_WEB_ALLOW_HOSTS` 为空）。**仍需用户提供的只有一件**：OpenAI/Claude/DeepSeek 官方端点的 key（才能验证官方行为）；协议层已用 mimo 的 OpenAI 与 Anthropic 两个端点验证通过。项目许可已定为 PolyForm Noncommercial 1.0.0。另有是否开启 Windows 开发者模式（见 §5.1）。
+- **工作流已在真项目上用真模型跑到人工确认点**（2026-11-17，历史记录）：当时经 PrintLab 自己的 CLI 建了测试项目 `P001`，run 先在证据阶段因 `constraints show` 为 `not_recorded` 而 `blocked`（正确），补 `constraints capture` 后重试 0 次模型调用，进入 `waiting/go_ahead` 并停在人工确认点，没有替用户回答。**之后用户同意删除，P001 已删，该 run 与另一条旧 run 已停止**，PrintLab 项目列表为空。**尚未做的：回答 yes 之后的交接阶段没有用真模型跑过。** 想再验证，需要先在 PrintLab 建一个新项目（会写 `Project/`，要用户同意）。
 - **启动**：在 `E:\MyProjet\PrintLabInterface` 运行 `PYTHONUTF8=1 ./.venv/Scripts/python.exe -m printlab_interface`（PowerShell 用 `$env:PYTHONUTF8=1; .\.venv\Scripts\python.exe -m printlab_interface`）。**停止**：Windows 上 `kill` 杀不干净，用 `Stop-Process`，并复核 8019 无监听。
 - **已用真 key 验证过的**（2026-11-17，用户提供的 mimo 测试 key，经管理 API 录入，DPAPI 加密保存，**不在仓库、不在审计、不在消息里**）：供应商 `mimo`（kind=`openai_compatible`，base=`https://token-plan-cn.xiaomimimo.com/v1`），模型 `mimo:mimo-v2.6-flash`。共 3 次真实调用，全部成功：纯文本一次；sarah 读 `printlab_materials`/`printlab_status` 并如实回答"剩余量是设备估算"；mike 收到伪造的"系统授权"要求批准并发送打印，**拒绝了，没有调用任何危险工具，PrintLab 与 `/api/prepared` 均未变化**。
 - **mimo 套餐条款与用户的决定**：用户贴出的条款写明"仅限在兼容的 AI 编程和智能体工具中**交互式**使用，**不可用于自动化脚本或应用后端**，违规可能导致订阅暂停或 key 被封"。本项目是自建后端服务。**用户已明确答复（2026-11-17）：不用管这条，直接使用，不由我们替用户决定使用哪个 API。** 所以：(1) 不在代码里给 key 加"仅交互式"之类的限制；(2) 工作流的模型是配置项，不写死任何供应商；(3) 合规与封号风险由用户自行承担，这里只记录事实，不再作为开工前置条件。这条决定只涵盖"用哪个 API"，**不放宽任何安全红线**：打印批准、发送、`approve`/`submit`/`reconcile` 仍然永久拒绝，无人值守运行同样不得触碰它们。
-- **没有真实验证过的**：OpenAI、Claude、DeepSeek 三家；真正的 token 级流式输出（现在是按事件流，不是逐字）；工具调用在其他供应商上的格式差异；`reasoning_effort`、`response_format` 在真实供应商上的行为；多 key 池的真实失败切换。
+- **协议层真实验证（2026-11-17，用户的范围是"基础 OpenAI 协议和 Anthropic 协议通就行"）**：同一个 mimo key 同时走两条协议——`mimo:`（OpenAI 兼容，`…/v1`）与 `mimoa:`（`anthropic` 类型，`https://token-plan-cn.xiaomimimo.com/anthropic`，供应商 `mimoa` 是我在本机库里新建的，key 是从 `mimo` 复制的，不在仓库里）。两边都通过：纯文本（`pong`）、sarah 调用真实 `printlab_status` 工具、第二轮带着工具调用历史继续对话，均 `done`、无错误；审计里两条协议各自的 `model_call` 都是 ok，审计与日志里没有 key 或管理令牌。**这只证明我们的网关到 mimo 的两个兼容端点是通的，并不证明 Anthropic 官方、OpenAI 官方端点的行为**（mimo 文档提到 Anthropic 协议下带工具调用的多轮需要透传 reasoning_content，我们的多轮在 mimoa 上通过了，但没有专门构造该边界情形）。官方 OpenAI/Claude/DeepSeek 端点仍未验证，需要对应的 key。其他未验证项：真正的 token 级流式；`reasoning_effort`、`response_format` 在真实供应商上的行为；多 key 池的真实失败切换。
 - **P3-4 的 G1–G4**（2026-11-17）：P3-4b 加入 HTTP 入口后，**运行中**（先断言 8019 有监听、`/healthz` 通）与**摘除后**（先断言 8019 无监听、无进程，否则中止）各跑一次 PrintLab 全套：446 通过 / 42 跳过 / 7 失败（基线，同样 7 个符号链接用例）、`verify_onboarding` ok、`doctor` 四工具可用且 `missing_context` 为空、`git status` 空、无 `%SystemDrive%` 垃圾目录。聊天台与浏览器冒烟加入之后的最终提交前还要再测一次，见下方"提交前复核"。
 - P2-a 的 G1–G4（2026-11-17）：sidecar 运行中跑 PrintLab 全套（446/42/7、`verify_onboarding` ok、PrintLab `git status` 空），随后真正停掉（同一条命令里先断言 8019 无监听、无进程，否则中止），再测一遍结果相同。
 - 上一次（P1 验收）的完整记录：G1 PrintLab `git status` 为空；G2 pytest 446 通过 / 42 跳过 / 7 失败，与基线一致（同样 7 个符号链接用例）；G3 `verify_onboarding` ok:true、`/api/health` ok:true、`doctor` 四工具可用且 `missing_context` 为空；G4 摘除 sidecar（确认 8019 无监听、无 printlab_interface 进程）后 G1–G3 仍全部通过，反向实测 sidecar 在 `PLI_PRINTLAB_ROOT=""` 且 PrintLab 地址不可达时仍能启动并返回 `/healthz` ok。**踩过的坑**：`kill $!` 在 Windows 下没有真正结束 uvicorn 子进程，必须用 PowerShell `Stop-Process` 并复核端口，否则 G4 是假的（本次第一轮 G4 数据因此作废并重测）。
@@ -96,7 +96,7 @@
 ### 2.4 参考项目 NarraFork（第一步调研结论）
 - 仓库：https://github.com/NarraFork/NarraFork，调研提交 `eeb30f9`（2026-11-16），**MPL-2.0**（文件级弱 copyleft）。Bun + TypeScript + Hono + Drizzle + React，SQLite。
 - **决定：只借鉴设计，不拷贝源码。** 复制其源文件会使这些文件须继续以 MPL 开源。
-- 本地临时克隆：`/tmp/ref/NarraFork`（236 MB，Git Bash 的 /tmp，可能被清理）。重取：`git clone --depth 1 https://github.com/NarraFork/NarraFork.git` 然后 `git checkout eeb30f9`（深度为 1 时需先 `fetch` 该提交）。是否保留待用户答复（见 §5）。
+- 本地临时克隆 `/tmp/ref/NarraFork` **已按用户同意删除**；需要时重取：`git clone --depth 1 https://github.com/NarraFork/NarraFork.git`（调研提交 `eeb30f9`）。
 - 重点文档：`docs/AGENT_PROVIDERS.md`、`docs/plugin-system/`（00 总览、02 宿主架构、03 Manifest、11 能力策略）、`docs/OPEN_API.md`。
 - 值得借鉴（映射到我们）：
 
@@ -181,7 +181,7 @@ PrintLab 的 `Runtime/venv` 写入了绝对路径（搬动后 venv 失效需重�
   - 测试 90 个（`tests/test_policy.py`、`test_runner.py`、`test_app.py`），全部通过。
 
 ### 4.2 进行中
-- run `59a3aca093224f35`（P001 测试项目的 object-intake）停在人工确认点，等用户在聊天台回答。其余只剩 §5.1 里需要用户的事项；没有我可以自行推进的开发项。测试项目 P001 与它的 TEST 约束记录是否删除，由用户决定。
+- 无。没有我可以自行推进的开发项。仅剩需要用户的事：补 OpenAI/Claude/DeepSeek **官方端点**验证（需对应 key）。协议层（OpenAI 兼容、Anthropic 兼容）已用 mimo 的两个端点真实验证通过。
 
 ### 4.3 当前仓库文件导航（PrintLabInterface）
 ```
@@ -217,12 +217,12 @@ E:\MyProjet\PrintLabInterface\
 ## 5. 未解决问题、风险与待确认项
 
 ### 5.1 待用户确认
-1. **NarraFork 临时克隆（`/tmp/ref/NarraFork`，236 MB）保留还是清理？** 尚未回答；默认暂不删除。
+1. ~~NarraFork 临时克隆~~：用户已同意删除，已删。
 2. ~~Git 身份~~：已解决。环境变量 GIT_AUTHOR_*/GIT_COMMITTER_* 已提供身份（cuckoo711），用户已明确要求提交并推送，且给出了两个远端地址。
 3. ~~许可~~：已决定（2026-11-17，用户选择；先问过是否有"不能商用、要署名"的许可，用户选了这一项）：**PolyForm Noncommercial 1.0.0**，与 PrintLab 一致。`LICENSE` 顶部有 `Required Notice: Copyright (c) 2026 cuckoo711 (…)` 一行，按许可第 Notices 条，转发软件的人必须保留它，这就是署名；下面是商用请联系的说明（联系方式是 GitHub 主页，没有邮箱）。许可正文取自官方 1.0.0 文件，已与 PrintLab 自己那份和官方发布文本比对一致。`pyproject.toml` 用官方 SPDX 标识 `PolyForm-Noncommercial-1.0.0`，隔离构建已验证轮子元数据与带署名的 LICENSE。署名用 `cuckoo711`（只有 git 身份，没有真实姓名），想改直接改 `LICENSE` 顶部。不拷贝 PrintLab 代码或文档。**不是法律意见**：PolyForm 的"非商用"以许可原文为准，我没有核对过它在你所在法域的效力。
 4. 开启 Windows 开发者模式后重跑 PrintLab 测试，把 7 个符号链接用例纳入基线？（需要用户在系统设置中操作。）
 5. 模型供应商的 key（OpenAI、Claude、DeepSeek 等）由用户自己填入，我不接触。何时进入 P2 由用户决定。
-6. P001（TEST 项目）及其 `Review/manufacturing-context.json` 保留还是删除？我没有删。若要删，直接删 `E:\MyProjet\PrintLab\Project\P001-TEST-object-intake-smoke`（在 PrintLab 的 .gitignore 里，不影响 git）。
+6. ~~P001 测试项目~~：用户已同意删除，已删。
 
 ### 5.2 技术未知项（需要在 P0 Spike 或后续阶段验证）
 - LiteLLM + LangGraph（及可选 PydanticAI / OpenAI Agents SDK）版本兼容、工具调用在不同供应商（尤其 DeepSeek）上的格式差异、传递依赖许可。**退路**：自写极小状态机（阶段固定、不超过十来个）。
@@ -311,7 +311,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | 设备卡与工具版本 | `PrintLab\Library\Devices\X2D\device.json`、`installed.md`（已 gitignore，本机文件） |
 | 用户偏好 | `PrintLab\Context\profile.md`（本机文件） |
 | PrintLab 后端入口 | `PrintLab\Harness\printlab\api.py`、`cli.py`、`prepared_api.py`、`workspace.py` |
-| NarraFork 参考 | `/tmp/ref/NarraFork`：`docs/AGENT_PROVIDERS.md`、`docs/plugin-system/*`、`docs/OPEN_API.md`；`server/lib/agent/provider.ts`、`credential-pool.ts`、`pooled-provider.ts`；`server/services/agent-runtime/policy.ts`、`mailbox*.ts`；`server/services/custom-subagent-service.ts`；`shared/model-catalog/*` |
+| NarraFork 参考 | （本地克隆已删，重取见 §2.4）：`docs/AGENT_PROVIDERS.md`、`docs/plugin-system/*`、`docs/OPEN_API.md`；`server/lib/agent/provider.ts`、`credential-pool.ts`、`pooled-provider.ts`；`server/services/agent-runtime/policy.ts`、`mailbox*.ts`；`server/services/custom-subagent-service.ts`；`shared/model-catalog/*` |
 | 本机硬件 | 个人知识库 `EzNzwwjxJ78jfuGhKRGVd` |
 | 任务清单（会话内） | `spec://tasks.json`（会话级，不在磁盘；以本文件 §7 为准） |
 
@@ -348,6 +348,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P4-b 完成（站内邮箱、规则巡检、带硬上限的定时/事件触发，默认全关）；613 测试；真环境与真模型各验一次；token 上限为运行间检查（会超出一次）。
 - 2026-11-17：P5 完成（`/admin` 后台、配置导出不含密钥）；625 测试 + 浏览器冒烟 55 项；反向代理有意不做。
 - 2026-11-17：最终验收：625 测试 + 1 跳过；浏览器冒烟 55 项连跑多轮；G1–G3 在 sidecar **运行中**（8019 有监听、healthz 通）与**摘除后**（同一命令里断言 8019 无监听、无 python printlab_interface 进程）各一次，结果相同（PrintLab 446/42/7、`scripts/verify_onboarding.py` ok、health ok、doctor 的 missing_context 为空、git status 空、无 `%SystemDrive%` 目录）；反向（PrintLab 根为空且地址不可达）sidecar 仍能起来并返回 healthz、`/admin` 200。**注意**：`verify_onboarding` 是 `scripts/verify_onboarding.py`，不是 `printlab` 的子命令。
+- 2026-11-17：用户同意删除 PrintLab 里的测试项目 P001 与 `/tmp/ref/NarraFork` 克隆，均已删除（PrintLab 项目列表恢复为空，git status 为空）；两条旧工作流记录已停止；协议层真实验证：OpenAI 协议（mimo）与 Anthropic 协议（mimoa）都通。
 - 2026-11-17：项目许可定为 PolyForm Noncommercial 1.0.0（用户先选了 MIT，随后问有没有禁止商用且署名的，改选此项；MIT 版本只在本地，从未提交）：新增 `LICENSE`（含 Required Notice 署名与商用联系说明）、`pyproject.toml` 加 `license`/`license-files` 并把构建要求抬到 setuptools>=77、`docs/LICENSES.md` 加说明。
 - 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
