@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrintLabInterface 管理</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/admin/app.css">
+</head>
+<body>
+<header>
+  <h1>PrintLabInterface 管理</h1>
+  <span id="conn" class="pill">未连接</span>
+  <a href="/chat">聊天台</a>
+</header>
+
+<section id="gate">
+  <p>输入管理令牌后继续。令牌在 <code>data/admin_token</code> 里。它只保存在这个页面的内存中，刷新页面后需要重新输入。</p>
+  <form id="gate-form" autocomplete="off">
+    <label for="token">管理令牌</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" required>
+    <button type="submit">连接</button>
+  </form>
+  <p id="gate-error" class="error" role="alert" hidden></p>
+</section>
+
+<div id="admin" hidden>
+  <p id="notice" role="status" class="notice"></p>
+  <nav aria-label="管理分区">
+    <button type="button" data-tab="providers" aria-current="true">供应商与密钥</button>
+    <button type="button" data-tab="schedules">定时计划</button>
+    <button type="button" data-tab="mailbox">信箱 <span id="unread" class="pill">0</span></button>
+    <button type="button" data-tab="roles">角色与工作流</button>
+    <button type="button" data-tab="audit">审计与导出</button>
+  </nav>
+
+  <section id="tab-providers" class="tab" aria-labelledby="h-providers">
+    <h2 id="h-providers">供应商与密钥</h2>
+    <p class="hint">密钥只能写入，页面和接口都不会再显示它。列表里只有最后几位的提示。</p>
+    <div id="providers"></div>
+    <h3>添加供应商</h3>
+    <form id="provider-form" class="grid" autocomplete="off">
+      <label for="p-prefix">前缀（模型写成 前缀:模型名）</label><input id="p-prefix" maxlength="32" required spellcheck="false">
+      <label for="p-name">名称</label><input id="p-name" maxlength="100" required>
+      <label for="p-kind">类型</label>
+      <select id="p-kind">
+        <option>openai_compatible</option><option>openai</option><option>anthropic</option><option>deepseek</option>
+        <option>gemini</option><option>openrouter</option><option>ollama</option>
+      </select>
+      <label for="p-base">接口地址（openai_compatible 需要）</label><input id="p-base" maxlength="300" spellcheck="false">
+      <span></span><button type="submit">添加供应商</button>
+    </form>
+    <h3>添加密钥</h3>
+    <form id="key-form" class="grid" autocomplete="off">
+      <label for="k-prefix">供应商</label><select id="k-prefix" required></select>
+      <label for="k-label">标签</label><input id="k-label" maxlength="60" value="key">
+      <label for="k-key">密钥</label><input id="k-key" type="password" autocomplete="off" spellcheck="false" minlength="8" maxlength="500" required>
+      <label for="k-priority">优先级（数字小的先用）</label><input id="k-priority" type="number" min="0" max="10000" value="100">
+      <span></span><button type="submit">保存密钥</button>
+    </form>
+  </section>
+
+  <section id="tab-schedules" class="tab" aria-labelledby="h-schedules" hidden>
+    <h2 id="h-schedules">定时计划</h2>
+    <p id="sched-global" class="hint"></p>
+    <div id="schedules"></div>
+    <h3>新建计划（创建后默认是关闭的）</h3>
+    <p class="hint">会调用模型的计划必须同时设置运行次数上限和 token 上限。上限在两次运行之间检查，已开始的一次运行不会被切断，所以最后一次可能超出 token 上限（实测一次带工具的运行约 6000 token）。</p>
+    <form id="sched-form" class="grid" autocomplete="off">
+      <label for="s-name">名称</label><input id="s-name" maxlength="40" required spellcheck="false">
+      <label for="s-kind">种类</label>
+      <select id="s-kind"><option value="patrol">巡检（不调用模型）</option><option value="agent">角色（调用模型）</option></select>
+      <label for="s-interval">间隔（秒；巡检 60 起，角色 900 起）</label><input id="s-interval" type="number" min="60" value="3600" required>
+      <label for="s-trigger">触发</label>
+      <select id="s-trigger"><option value="interval">到点就跑</option><option value="patrol_change">巡检发现变化后才跑</option></select>
+      <label for="s-agent">角色</label><select id="s-agent"></select>
+      <label for="s-model">模型（留空用角色文件里的）</label><input id="s-model" maxlength="200" spellcheck="false">
+      <label for="s-prompt">提示词</label><textarea id="s-prompt" rows="3" maxlength="2000"></textarea>
+      <label for="s-runs">运行次数上限（1-1000）</label><input id="s-runs" type="number" min="1" max="1000">
+      <label for="s-tokens">token 上限（1000-5000000）</label><input id="s-tokens" type="number" min="1000" max="5000000">
+      <span></span><button type="submit">创建（关闭状态）</button>
+    </form>
+  </section>
+
+  <section id="tab-mailbox" class="tab" aria-labelledby="h-mailbox" hidden>
+    <h2 id="h-mailbox">信箱</h2>
+    <div class="row"><button id="mail-refresh" type="button">刷新</button><label><input id="mail-unread" type="checkbox"> 只看未读</label></div>
+    <div id="mail"></div>
+  </section>
+
+  <section id="tab-roles" class="tab" aria-labelledby="h-roles" hidden>
+    <h2 id="h-roles">角色与工作流（只读）</h2>
+    <p class="hint">它们是 <code>config/agents/*.md</code> 与 <code>config/workflows/*.yaml</code> 里的文件。这里不能编辑：改文件后重启服务。无效的定义会列出原因，并且没有任何工具权限。</p>
+    <div id="agents"></div>
+    <h3>工作流</h3>
+    <div id="workflows"></div>
+  </section>
+
+  <section id="tab-audit" class="tab" aria-labelledby="h-audit" hidden>
+    <h2 id="h-audit">审计与导出</h2>
+    <div class="row">
+      <button id="export" type="button">导出配置（不含任何密钥）</button>
+      <button id="audit-refresh" type="button">刷新审计</button>
+    </div>
+    <p class="hint">导出文件里没有密钥，连加密后的密钥也没有。换一台机器恢复后，密钥需要重新录入。当前没有导入功能。</p>
+    <div id="audit"></div>
+  </section>
+</div>
+<script src="/admin/admin.js"></script>
+</body>
+</html>

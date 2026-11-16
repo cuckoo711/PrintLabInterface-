@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import __version__, db, redact, security, web
+from . import __version__, backup, db, redact, security, web
 from .adapters.printlab import PrintLabAdapter
 from .agents import api as agents_api
 from .automation import api as automation_api
@@ -97,6 +97,14 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
     def audit(limit: int = 50) -> list[dict]:
         with db.session(settings.db_path) as conn:
             return db.recent_audit(conn, limit)
+
+    @app.get("/api/export", dependencies=[Depends(security.require_admin)])
+    def export_config() -> JSONResponse:
+        """Configuration without any key material. See backup.py."""
+        with db.session(settings.db_path) as conn:
+            data = backup.export_config(conn, app.state.scheduler.list())
+            db.record_audit(conn, "admin", "export", "config", "ok", f"providers={len(data['providers'])} schedules={len(data['schedules'])}")
+        return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="printlab-interface-config.json"', "Cache-Control": "no-store"})
 
     app.include_router(providers_api.router)
     app.include_router(agents_api.router)

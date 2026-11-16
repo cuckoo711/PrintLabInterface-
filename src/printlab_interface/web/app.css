@@ -44,3 +44,26 @@ h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600;
 .badge.waiting { border-color: var(--accent); color: var(--accent); } .badge.blocked, .badge.failed { border-color: var(--err); color: var(--err); }
 .badge.finished { border-color: #1b7f3b; color: #1b7f3b; }
 @media (max-width: 720px) { #wf-panel { padding: 12px 8px; } }
+
+/* admin page */
+header a { margin-left: auto; color: var(--accent); }
+#admin { padding: 12px 16px; max-width: 980px; width: 100%; margin: 0 auto; }
+nav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+nav button { background: transparent; color: var(--fg); border-color: var(--line); }
+nav button[aria-current="true"] { border-color: var(--accent); color: var(--accent); }
+.notice { min-height: 1.5em; margin: 0 0 8px; color: var(--muted); }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+.card.read { opacity: .65; }
+.card h3 { margin: 0 0 4px; color: var(--fg); font-size: 14px; }
+.hint { color: var(--muted); font-size: 13px; margin: 4px 0; }
+.quote { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid var(--line); padding-left: 8px; margin: 6px 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; margin: 6px 0; }
+.grid { display: grid; grid-template-columns: minmax(160px, 260px) 1fr; gap: 6px 10px; align-items: center; max-width: 720px; }
+.grid textarea { grid-column: 2; }
+ul.plain { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+ul.plain li { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+button.quiet { background: transparent; color: var(--fg); border-color: var(--line); }
+.badge.on { border-color: #1b7f3b; color: #1b7f3b; } .badge.off { color: var(--muted); }
+.badge.warn { border-color: #b26a00; color: #b26a00; } .badge.error { border-color: var(--err); color: var(--err); }
+table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 4px 6px; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .grid textarea { grid-column: 1; } }

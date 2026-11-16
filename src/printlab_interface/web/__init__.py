@@ -12,6 +12,8 @@ _FILES = {
     "": ("chat.html", "text/html; charset=utf-8"),
     "app.css": ("app.css", "text/css; charset=utf-8"),
     "app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "admin": ("admin.html", "text/html; charset=utf-8"),
+    "admin.js": ("admin.js", "text/javascript; charset=utf-8"),
 }
 # No inline script or style, no remote origins, no framing. connect-src 'self' lets the page call this API only.
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; "
@@ -48,3 +50,19 @@ def chat_css() -> Response:
 @router.get("/chat/app.js", include_in_schema=False)
 def chat_js() -> Response:
     return _serve("app.js")
+
+
+@router.get("/admin", include_in_schema=False)
+@router.get("/admin/", include_in_schema=False)
+def admin_page() -> Response:
+    return _serve("admin")
+
+
+@router.get("/admin/admin.js", include_in_schema=False)
+def admin_js() -> Response:
+    return _serve("admin.js")
+
+
+@router.get("/admin/app.css", include_in_schema=False)
+def admin_css() -> Response:
+    return _serve("app.css")

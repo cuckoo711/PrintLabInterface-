@@ -292,7 +292,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P3-5 | 已完成 | 两个只读"原生"工具（`tools/native.py`，不走 PrintLab CLI）：`printlab_docs_search` 只搜 PrintLab `docs/*.md`（一层目录、跳过符号链接、单文件 1MB、最多 200 个文件、命中带文件与行号，不碰 `Context/` 和 `Runtime/`）；`web_fetch` 只访问 `PLI_WEB_ALLOW_HOSTS`（逗号分隔，**默认为空 = 工具关闭且不提供给模型**）里的主机：仅 https、无查询串/片段/账号、不跟随重定向、域名解析到非公网地址即拒绝、路径不许含 `%`、10 秒超时、正文 30 万字节、文本 8000 字符。结果同样包成 `<printlab-data>` | 52 个新测试（总 552 通过、1 跳过）；4 处防线做过变异检查（公网地址、重定向、主机白名单、符号链接）；发现并修了一处真漏洞（路径允许 `%` 时 `%2e%2e`、`%00` 能通过检查）；用真模型 mimo 实测 sarah 调用文档搜索并引用 `docs/PRINTING.md` 行号，PrintLab `git status` 仍为空 |
 | P4-a | 已完成 | 工作流引擎：`workflows/definition.py`（YAML，四种阶段 agent/evidence/human/handoff；证据命令必须是 `check_cli` 判定为只读的；模板只允许 `{project}`/`{brief}`/`{out:id}`，不用 `str.format`；整个文件任何问题即整体拒绝）、`workflows/engine.py`（LangGraph + 独立 SQLite 检查点 `data/workflow_checkpoints.db` + `workflow_runs` 表；start 以 request_id 幂等；answer 只收 yes/no 且只在 waiting；blocked/interrupted 可 retry；重启把 running 标为 interrupted）、`workflows/api.py`（`/api/workflows`、`/api/workflow-runs` 及 answer/retry/stop，全部需 admin token）、聊天台"工作流"面板、内置 `config/workflows/object-intake.yaml` | 501 个测试；引擎与 API 的关键防线逐一变异检查；浏览器冒烟 35 项；G1–G3 运行中与摘除后均通过 |
 | P4-b | 已完成（默认全关） | `automation/`：`mailbox.py`（SQLite 邮箱，写入脱敏、500 行上限、已读先丢）、`patrol.py`（**不调模型**的规则巡检：离线/未连接/遥测过期/FAILED·PAUSE/等待清盘/HMS 码，只在发现集合**变化**时发信）、`scheduler.py`（三层默认关：`PLI_SCHEDULER=1` 才启动；每个计划创建时 `enabled=0`；调模型的计划**必须同时给 `max_runs` 与 `max_total_tokens`**，没有默认值也没有"无限"，达到即自动关闭并发信；连续 3 次失败自动关；同一时间只跑一个；最多 20 个计划）、`api.py`（`/api/mailbox`、`/api/scheduler`、`/api/schedules` 增改删与手动运行，全部需 admin token）、`config/agents/patrol.md`（只读角色）。触发方式只有 interval 与 patrol_change（巡检发现变化后，agent 才跑，间隔当冷却）。**没有邮件收取（IMAP）**，"邮箱"指 Agent/调度到人的站内信箱 | 61 个新测试（总 613 通过、1 跳过）；9 处防线做过变异检查（全局开关、默认关闭、两个上限、变化才发信、失败连关、上限可选、启用已用尽的计划）；真实环境：巡检读到 H2C 的真实 HMS `050002000003000A` 并发信；真模型（mimo）跑了一次带上限计划（max_runs=1），自动关闭、第二次手动运行被拒；PrintLab `git status` 仍为空。**上限在两次运行之间检查**：已开始的运行不会被切断，实测一次带工具调用的运行用了约 6000 token（上限 3000），所以 token 上限要按"可能超出一次运行的用量"来定 |
-| P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
+| P5 | 已完成（反向代理未做） | `/admin` 管理后台（`web/admin.{html,js}`，沿用聊天台的安全做法：CSP 无内联、只用 `textContent`、令牌只在内存、无存储）：供应商/密钥（密钥只写入、保存后立即清空输入框、之后不再显示；删除前确认）、定时计划（创建即关闭；调模型的计划表单强制两个上限；调度器关闭时不提供"立即运行"）、信箱（标已读）、角色与工作流（**只读**，改文件后重启）、审计表、`/api/export` 配置导出（`backup.py`：**不含任何密钥，连加密形式也不含**；没有导入）。**反向代理没做，是有意的**：旧工作台是已构建的静态包，代理会让"摘除后各自独立运行"变复杂，收益只是少记一个端口；两个页面互相有链接即可 | 12 个新测试（总 625 通过、1 跳过）；导出两处防线做过变异检查；真浏览器（Edge）冒烟 55 项（含后台页 20 项：错令牌、加供应商、名称里的标记保持为文本、密钥不回显、计划默认关、无上限被服务端拒绝、导出文件无密钥、刷新要重输令牌、零 CSP 违规），连跑 12 轮；其中一轮暴露了聊天台侧栏刷新的竞态（测试读得太早），已改成等待 |
 | P6 | 部分完成 | **已做**：`requirements.lock`（带哈希；用它 `--require-hashes` 装进干净环境，501 测试全过、`pip check` 无冲突）、`docs/LICENSES.md`（逐组统计与需要留意的包：MPL-2.0 的 certifi/tqdm/orjson，带原生二进制且无许可文件的 sqlite-vec）。**未做**：Windows 服务化、别的机器上的安装验证、逐包核对许可文本、决定本项目许可 | 全新机器按文档可安装；许可清单完整 |
 
 ---
@@ -345,6 +345,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：真项目端到端：建 P001 测试项目，object-intake 用真模型跑到人工确认点（先在 not_recorded 处正确阻塞，补记录后重试 0 次模型调用）；G1 保持为空。
 - 2026-11-17：P3-5 完成（文档搜索 + 受限网页抓取，网页工具默认关闭）；552 测试；真模型实测通过；修了路径 `%` 编码绕过。
 - 2026-11-17：P4-b 完成（站内邮箱、规则巡检、带硬上限的定时/事件触发，默认全关）；613 测试；真环境与真模型各验一次；token 上限为运行间检查（会超出一次）。
+- 2026-11-17：P5 完成（`/admin` 后台、配置导出不含密钥）；625 测试 + 浏览器冒烟 55 项；反向代理有意不做。
 - 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
 ## 10. 踩过的坑（后续务必先读）
@@ -395,7 +396,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 角色文件里的 `model` 目前留空，运行时必须传 `model`；还没有"默认模型"配置。
 - 没有对话长度压缩；历史只截最近 60 条。
 - 工具结果截断是按字符的粗截断，`status` 与 `context` 的完整结果常常超过 12000 字符，模型可能看不到后半段。后续考虑按字段裁剪（`status` 的 `material_slots` 与 `onboarding.inventory` 占了大头）。
-- 聊天台只有最基本的功能：没有 Markdown 渲染（刻意：先保证纯文本安全）、没有重命名/删除会话按钮（API 有 `DELETE /api/sessions/{id}`）、没有在页面上管理供应商与 key（只能用 API；这是 P5）。
+- 聊天台只有最基本的功能：没有 Markdown 渲染（刻意：先保证纯文本安全）、没有重命名/删除会话按钮（API 有 `DELETE /api/sessions/{id}`）、管理后台在 `/admin`（P5 已做）。
 - "流式"是事件流（开始、工具调用、文本、结束），**不是逐 token**：整段回复在模型返回后一次发出。
 - 页面没有做可访问性的人工验证（只有标签、live region、键盘焦点样式的静态检查与一次真浏览器冒烟）；不能据此宣称符合 WCAG，完整验证需要辅助技术手工测试。
 - 同一页面里令牌用输入框传入，**没有登录/会话机制**；任何拿到 `data/admin_token` 的本机进程都能调 API（文件已收紧到当前用户 + SYSTEM）。

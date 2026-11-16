@@ -142,6 +142,8 @@ stages:
         check("user message and assistant reply are rendered", "status please" in log and "The printer looks fine." in log)
         check("tool call is shown as a status line, without its payload", "printlab_status" in log and TOOL_SECRET not in log and "printlab-data" not in log)
         check("send is re-enabled and cancel is disabled when idle", page.is_enabled("#send") and page.is_disabled("#cancel"))
+        # The sidebar refreshes after the run ends without being awaited, so wait for it instead of reading at once.
+        expect(page.locator("#sessions button")).to_have_count(1, timeout=5000)
         check("session appears in the sidebar", page.locator("#sessions button").count() == 1)
 
         # --- hostile model output stays inert ---
@@ -217,6 +219,75 @@ stages:
         check("closing the panel returns to the chat", page.is_visible("#chat") and not page.is_visible("#wf-panel"))
         check("the token is still not stored anywhere after workflow use",
               page.evaluate("JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage), document.cookie])") == '[[],[],""]')
+
+        # --- admin page ---
+        admin = browser.new_page()
+        admin_errors: list[str] = []
+        admin_outside: list[str] = []
+        admin.on("console", lambda m: (admin_errors.append(m.text) if m.type == "error" else None))
+        admin.on("pageerror", lambda e: admin_errors.append(str(e)))
+        admin.on("request", lambda r: admin_outside.append(r.url) if not r.url.startswith(base) else None)
+        admin.add_init_script("document.addEventListener('securitypolicyviolation', e => (window.__csp = (window.__csp||[]).concat(e.violatedDirective + ' ' + e.blockedURI)))")
+        admin.goto(base + "/admin")
+        check("admin: page loads behind the token gate", admin.is_visible("#gate") and not admin.is_visible("#admin"))
+        admin.fill("#token", "definitely-wrong-token"); admin.click("#gate-form button")
+        admin.wait_for_selector("#gate-error:not([hidden])", timeout=5000)
+        check("admin: wrong token is rejected", "令牌" in admin.inner_text("#gate-error") and admin.is_visible("#gate"))
+        admin.fill("#token", token); admin.click("#gate-form button")
+        admin.wait_for_selector("#admin:not([hidden])", timeout=5000)
+        check("admin: correct token opens it", admin.inner_text("#conn") == "已连接" and admin.input_value("#token") == "")
+        check("admin: the seeded provider and its key hint are listed, the key is not",
+              "oa" in admin.inner_text("#providers") and "sk-smoke-fake-0123456789" not in admin.content())
+
+        admin.fill("#p-prefix", "demo"); admin.fill("#p-name", "Demo <b>x</b>"); admin.select_option("#p-kind", "openai")
+        admin.click("#provider-form button")
+        expect(admin.locator("#providers")).to_contain_text("demo", timeout=5000)
+        check("admin: a provider can be added; markup in its name stays text",
+              "Demo <b>x</b>" in admin.inner_text("#providers") and admin.locator("#providers b").count() == 0)
+        admin.select_option("#k-prefix", "demo"); admin.fill("#k-key", "sk-admin-smoke-ABCDEFGH12345")
+        admin.click("#key-form button")
+        expect(admin.locator("#providers")).to_contain_text("优先级", timeout=5000)
+        check("admin: a saved key is cleared from the field and never shown again",
+              admin.input_value("#k-key") == "" and "ABCDEFGH12345" not in admin.content() and "ABCDEFGH12345" not in admin.inner_text("body"))
+
+        admin.on("dialog", lambda d: d.accept())
+        admin.click("button[data-tab=schedules]")
+        check("admin: scheduler shows as switched off with no schedules", "关闭" in admin.inner_text("#sched-global"))
+        check("admin: manual run is not offered while the scheduler is off", admin.locator("#schedules button:has-text('立即运行一次')").count() == 0)
+        admin.fill("#s-name", "watch"); admin.select_option("#s-kind", "patrol"); admin.fill("#s-interval", "120")
+        admin.click("#sched-form button")
+        expect(admin.locator("#schedules")).to_contain_text("watch", timeout=5000)
+        check("admin: a new schedule is created switched off", "已关闭" in admin.inner_text("#schedules"))
+        admin.select_option("#s-kind", "agent")
+        check("admin: choosing a model-calling schedule requires both caps in the form",
+              admin.get_attribute("#s-runs", "required") is not None and admin.get_attribute("#s-tokens", "required") is not None)
+        admin.fill("#s-name", "uncapped"); admin.fill("#s-interval", "900"); admin.fill("#s-prompt", "hi")
+        admin.evaluate("document.getElementById('s-runs').required = false; document.getElementById('s-tokens').required = false")
+        admin.click("#sched-form button")
+        expect(admin.locator("#notice")).to_have_class("notice error", timeout=5000)
+        check("admin: the server still refuses a schedule without caps", "max_runs" in admin.inner_text("#notice"), admin.inner_text("#notice"))
+
+        admin.click("button[data-tab=mailbox]")
+        check("admin: empty mailbox says so", "没有消息" in admin.inner_text("#mail"))
+        admin.click("button[data-tab=roles]")
+        check("admin: roles and workflows are listed read-only",
+              "helper" in admin.inner_text("#agents") and "flow" in admin.inner_text("#workflows") and admin.locator("#tab-roles textarea, #tab-roles input").count() == 0)
+        admin.click("button[data-tab=audit]")
+        with admin.expect_download(timeout=10000) as download_info:
+            admin.click("#export")
+        exported = Path(download_info.value.path()).read_text(encoding="utf-8")
+        check("admin: the exported file has no key in any form",
+              "sk-smoke-fake-0123456789" not in exported and "sk-admin-smoke-ABCDEFGH12345" not in exported and "sealed" not in exported and '"watch"' in exported)
+        expect(admin.locator("#audit")).to_contain_text("export", timeout=5000)
+        check("admin: the audit table shows the export, without any key", "ABCDEFGH12345" not in admin.inner_text("#audit"))
+
+        admin.reload()
+        check("admin: a reload asks for the token again", admin.is_visible("#gate"))
+        check("admin: nothing is stored in the browser",
+              admin.evaluate("JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage), document.cookie])") == '[[],[],""]')
+        check("admin: zero Content-Security-Policy violations", not admin.evaluate("window.__csp || []"), str(admin.evaluate("window.__csp || []")))
+        check("admin: no console errors other than the expected 401s", not [e for e in admin_errors if "401" not in e and "422" not in e], "; ".join(admin_errors[:3]))
+        check("admin: every request went to the sidecar only", not admin_outside, str(admin_outside[:3]))
 
         # --- browser-level security signals ---
         check("zero Content-Security-Policy violations", not page.evaluate("window.__csp || []"), str(page.evaluate("window.__csp || []")))
