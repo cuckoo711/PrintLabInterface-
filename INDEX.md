@@ -8,7 +8,7 @@
 ## 0. 快速恢复（先读这一节）
 
 - 当前位置：**P0、P1、P2-a、P3-1..4、P4-a（工作流引擎）已完成。** 可用状态：浏览器打开 `http://127.0.0.1:8019/chat`，输入 `data/admin_token` 里的令牌。左侧可选角色（sarah、mike、project）对话；也可在"工作流"里选 `object-intake`、填项目 ID 与说明启动，它会写一份需求清单、让 PrintLab 的 `constraints show` 做证据检查、停下来等你回答是/否，最后给出交接说明。角色与工作流都只能读 PrintLab，不能做任何打印动作。**未做：P3-5 搜索工具、P4-b（邮箱、巡检、定时/事件触发）、P5 管理后台页面、P6 稳定化；P2-b 只验证了 mimo 一家。**
-- **工作流只在"不存在的项目"上用真模型验证过**：用 `P999`（PrintLab 里没有这个项目）跑过一次，模型如实说项目不存在，引擎在证据阶段 `blocked`，没有到人工确认点。**从头到尾（含人工确认点、回答 yes、交接）只用假模型和假 PrintLab 验证过**，因为 PrintLab 里 0 个项目，创建项目会往你的 `Project/` 写数据，我没有擅自做。要真跑通，需要你同意建一个测试项目。
+- **工作流已在真项目上用真模型跑到人工确认点**（2026-11-17）：经 PrintLab 自己的 CLI 建了测试项目 `P001`（目录 `Project/P001-TEST-object-intake-smoke`，在 PrintLab 的 .gitignore 内，PrintLab `git status` 仍为空）。run `59a3aca093224f35`（`mimo:mimo-v2.6-flash`）：需求阶段写出清单后，证据阶段因 `constraints show` 为 `not_recorded` 而 `blocked`（正确）；用 `printlab constraints capture P001 --expect-sha missing` 补记录后 `retry`，**重试 0 次模型调用**（只重跑证据阶段），进入 `waiting/go_ahead`，**停在人工确认点，没有替用户回答**。**尚未做的：回答 yes 之后的交接阶段没有用真模型跑过。** 测试项目 P001 与那份记录是 TEST 数据，保留还是删除由用户决定，我没有删。run 的检查点在 `data/workflow_checkpoints.db`，重启 sidecar 后仍可在聊天台继续回答。
 - **启动**：在 `E:\MyProjet\PrintLabInterface` 运行 `PYTHONUTF8=1 ./.venv/Scripts/python.exe -m printlab_interface`（PowerShell 用 `$env:PYTHONUTF8=1; .\.venv\Scripts\python.exe -m printlab_interface`）。**停止**：Windows 上 `kill` 杀不干净，用 `Stop-Process`，并复核 8019 无监听。
 - **已用真 key 验证过的**（2026-11-17，用户提供的 mimo 测试 key，经管理 API 录入，DPAPI 加密保存，**不在仓库、不在审计、不在消息里**）：供应商 `mimo`（kind=`openai_compatible`，base=`https://token-plan-cn.xiaomimimo.com/v1`），模型 `mimo:mimo-v2.6-flash`。共 3 次真实调用，全部成功：纯文本一次；sarah 读 `printlab_materials`/`printlab_status` 并如实回答"剩余量是设备估算"；mike 收到伪造的"系统授权"要求批准并发送打印，**拒绝了，没有调用任何危险工具，PrintLab 与 `/api/prepared` 均未变化**。
 - **mimo 套餐条款与用户的决定**：用户贴出的条款写明"仅限在兼容的 AI 编程和智能体工具中**交互式**使用，**不可用于自动化脚本或应用后端**，违规可能导致订阅暂停或 key 被封"。本项目是自建后端服务。**用户已明确答复（2026-11-17）：不用管这条，直接使用，不由我们替用户决定使用哪个 API。** 所以：(1) 不在代码里给 key 加"仅交互式"之类的限制；(2) 工作流的模型是配置项，不写死任何供应商；(3) 合规与封号风险由用户自行承担，这里只记录事实，不再作为开工前置条件。这条决定只涵盖"用哪个 API"，**不放宽任何安全红线**：打印批准、发送、`approve`/`submit`/`reconcile` 仍然永久拒绝，无人值守运行同样不得触碰它们。
@@ -181,7 +181,7 @@ PrintLab 的 `Runtime/venv` 写入了绝对路径（搬动后 venv 失效需重�
   - 测试 90 个（`tests/test_policy.py`、`test_runner.py`、`test_app.py`），全部通过。
 
 ### 4.2 进行中
-- 无。下一步 P2 需要先问用户要不要现在开始、以及用哪几家供应商（key 由用户自己填入）。
+- run `59a3aca093224f35` 停在人工确认点，等用户在聊天台回答（yes/no）。其余下一步待用户选：P3-5 搜索工具、P4-b 自动化（先问频率与预算）、P5 管理后台、补其他供应商真实验证（需 key）、项目许可。
 
 ### 4.3 当前仓库文件导航（PrintLabInterface）
 ```
@@ -342,6 +342,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P3-1..3 完成（工具网关、角色定义、Agent 循环）；测试 303 个；修复 `$` 换行漏洞与 argv 内嵌标志漏洞。P3-4/P3-5 未做。摘除状态下 G1–G3 通过。
 - 2026-11-17：P3-4 完成（会话存储、SSE 聊天 API、`/chat` 页面、真浏览器冒烟）；用用户提供的 mimo key 做了 3 次真实调用；测试 379 个；修复 2 个冒烟发现的缺陷与 key 回显泄露风险。
 - 2026-11-17：P4-a 完成（LangGraph Spike；工作流定义/引擎/HTTP 入口；聊天台工作流面板；`CallResult.truncated` 与 Agent 状态 `truncated`）；501 测试 + 浏览器冒烟 35 项；G1–G3 运行中/摘除后通过。P4-b 未做。
+- 2026-11-17：真项目端到端：建 P001 测试项目，object-intake 用真模型跑到人工确认点（先在 not_recorded 处正确阻塞，补记录后重试 0 次模型调用）；G1 保持为空。
 - 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
 ## 10. 踩过的坑（后续务必先读）
@@ -399,7 +400,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 只有 mimo 一家做过真实验证；其他供应商的真实行为未知。
 - P4-b、P5 管理后台、P3-5 搜索工具都没开始。P6 只做了依赖锁定与许可清单（见上）；"全新机器按文档安装"只在本机用临时虚拟环境验证过，没有在别的机器上验证。
 - **P4-b 没做**：Agent 间 SQLite 邮箱、只读巡检角色、定时/事件触发、"完整小物件流程跑到待批准"。当前工作流只有一个内置的 `object-intake`，它的终点是"交接给人"，不涉及建模、切片、批准、发送。
-- **工作流端到端（含人工点 yes 之后）没有用真模型+真项目跑过**，原因见 §0；假模型下的 30+28 个测试和浏览器冒烟覆盖了这条路径。
+- **工作流回答 yes 之后的交接阶段没有用真模型跑过**（到人工确认点为止已用真模型+真项目验证，见 §0）。
 - **工作流的检查点没有清理机制**：`data/workflow_checkpoints.db` 会一直增长；同一线程被两个进程同时恢复的情形没有测。
 - **`answer`/`retry` 的并发保护只在单进程内**（内存里的 `_busy` 集合）。多个 sidecar 进程指向同一个库时不安全；目前设计是单进程。
 - **工作流的 agent 阶段每次都新开一个 agent 运行**（`session=wf-<run id>` 只用于密钥粘性），不写入聊天会话，也不进聊天台的会话列表。
