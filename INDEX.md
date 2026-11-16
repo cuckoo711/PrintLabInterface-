@@ -187,10 +187,13 @@ PrintLab 的 `Runtime/venv` 写入了绝对路径（搬动后 venv 失效需重�
 ```
 E:\MyProjet\PrintLabInterface\
 ├─ INDEX.md                         本文件
-├─ pyproject.toml                   fastapi、uvicorn、httpx、litellm>=1.109,<2、langgraph>=1.2,<2；test: pytest；脚本 printlab-interface
+├─ pyproject.toml                   fastapi、uvicorn、httpx、litellm>=1.109,<2、langgraph>=1.2,<2、langgraph-checkpoint-sqlite>=3,<4、pyyaml>=6,<7；test: pytest；browser: playwright；脚本 printlab-interface
+├─ requirements.lock                94 包带哈希的锁定（重新生成与验证命令见 docs/LICENSES.md 末尾）
 ├─ .gitignore                       忽略 .venv、data/*（保留 .gitkeep）、config/*.local.*、.env*
 ├─ .venv\                           独立虚拟环境（不进 git）
 ├─ docs\SPIKE_P0_3.md、spike_p0_3.py   P0-3 结论与可重跑脚本
+├─ docs\SPIKE_P4.md、spike_p4.py       P4-0（LangGraph 检查点）结论与可重跑脚本
+├─ docs\LICENSES.md                  第三方许可清单（做了什么、没做什么）
 ├─ src\printlab_interface\
 │   ├─ __init__.py（版本 0.1.0）  __main__.py  app.py  config.py  db.py  redact.py
 │   ├─ secrets.py                    DPAPI 加密（Windows）；其他平台需 PLI_SECRET_KEY；绝不明文
@@ -290,7 +293,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P4-a | 已完成 | 工作流引擎：`workflows/definition.py`（YAML，四种阶段 agent/evidence/human/handoff；证据命令必须是 `check_cli` 判定为只读的；模板只允许 `{project}`/`{brief}`/`{out:id}`，不用 `str.format`；整个文件任何问题即整体拒绝）、`workflows/engine.py`（LangGraph + 独立 SQLite 检查点 `data/workflow_checkpoints.db` + `workflow_runs` 表；start 以 request_id 幂等；answer 只收 yes/no 且只在 waiting；blocked/interrupted 可 retry；重启把 running 标为 interrupted）、`workflows/api.py`（`/api/workflows`、`/api/workflow-runs` 及 answer/retry/stop，全部需 admin token）、聊天台"工作流"面板、内置 `config/workflows/object-intake.yaml` | 501 个测试；引擎与 API 的关键防线逐一变异检查；浏览器冒烟 35 项；G1–G3 运行中与摘除后均通过 |
 | P4-b | **未做** | 原计划里的这几项**没有做**：SQLite 邮箱（Agent 间通信）、只读巡检角色、定时/事件触发、"一次完整小物件流程跑到待批准"。其中定时/事件触发需要无人值守调用模型（用户已表示 API 条款自行负责）。 | 需要用户先同意怎么做；见 §11 |
 | P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
-| P6 | 低 | 稳定化：许可扫描、依赖锁定、文档、可选 Windows 服务化 | 全新机器按文档可安装；许可清单完整 |
+| P6 | 部分完成 | **已做**：`requirements.lock`（带哈希；用它 `--require-hashes` 装进干净环境，501 测试全过、`pip check` 无冲突）、`docs/LICENSES.md`（逐组统计与需要留意的包：MPL-2.0 的 certifi/tqdm/orjson，带原生二进制且无许可文件的 sqlite-vec）。**未做**：Windows 服务化、别的机器上的安装验证、逐包核对许可文本、决定本项目许可 | 全新机器按文档可安装；许可清单完整 |
 
 ---
 
@@ -339,6 +342,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P3-1..3 完成（工具网关、角色定义、Agent 循环）；测试 303 个；修复 `$` 换行漏洞与 argv 内嵌标志漏洞。P3-4/P3-5 未做。摘除状态下 G1–G3 通过。
 - 2026-11-17：P3-4 完成（会话存储、SSE 聊天 API、`/chat` 页面、真浏览器冒烟）；用用户提供的 mimo key 做了 3 次真实调用；测试 379 个；修复 2 个冒烟发现的缺陷与 key 回显泄露风险。
 - 2026-11-17：P4-a 完成（LangGraph Spike；工作流定义/引擎/HTTP 入口；聊天台工作流面板；`CallResult.truncated` 与 Agent 状态 `truncated`）；501 测试 + 浏览器冒烟 35 项；G1–G3 运行中/摘除后通过。P4-b 未做。
+- 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
 ## 10. 踩过的坑（后续务必先读）
 1. **子进程环境白名单太窄**：`printlab status` 退出码 0 但输出为空，并在 cwd 下造出名为 `%SystemDrive%` 的目录。白名单必须含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等，子进程 cwd 用 `data/run`，每次调用前后比对 PrintLab 的 `git status`。
@@ -379,7 +383,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 ## 11. 已知缺口（尚未做，不要当成已完成）
 - 没有真实供应商调用；没有流式输出；没有取消；没有工具调用循环（P3）。
 - 写类 PrintLab 命令（handoff、new、build 等）只有单测，没有对真实 PrintLab 实跑。
-- litellm、langgraph 没有锁定文件；许可只做了元数据粗筛。
+- 依赖已锁定（`requirements.lock`，94 包带哈希，`uv pip compile --universal`）；许可清单见 `docs/LICENSES.md`。**许可信息只来自各包自己的元数据**，没有逐包核对许可文本；`sqlite-vec` 与 `tokenizers` 的轮子里没有随附许可文件。本项目自己的许可**仍未决定**，在决定之前不应对外分发。
 - admin token 只保护 API，没有用户账号体系；服务只绑 127.0.0.1。
 - 用量只记在审计表里（token 数、耗时），还没有预算上限与告警。
 - `docs/spike_p0_3.py` 里的环境白名单是旧版，正式版在 `adapters/printlab/runner.py`。
@@ -393,7 +397,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 页面没有做可访问性的人工验证（只有标签、live region、键盘焦点样式的静态检查与一次真浏览器冒烟）；不能据此宣称符合 WCAG，完整验证需要辅助技术手工测试。
 - 同一页面里令牌用输入框传入，**没有登录/会话机制**；任何拿到 `data/admin_token` 的本机进程都能调 API（文件已收紧到当前用户 + SYSTEM）。
 - 只有 mimo 一家做过真实验证；其他供应商的真实行为未知。
-- P4 工作流、P5 管理后台、P6 许可扫描与依赖锁定都没开始；`litellm`、`langgraph`、`playwright` 没有锁定文件。
+- P4-b、P5 管理后台、P3-5 搜索工具都没开始。P6 只做了依赖锁定与许可清单（见上）；"全新机器按文档安装"只在本机用临时虚拟环境验证过，没有在别的机器上验证。
 - **P4-b 没做**：Agent 间 SQLite 邮箱、只读巡检角色、定时/事件触发、"完整小物件流程跑到待批准"。当前工作流只有一个内置的 `object-intake`，它的终点是"交接给人"，不涉及建模、切片、批准、发送。
 - **工作流端到端（含人工点 yes 之后）没有用真模型+真项目跑过**，原因见 §0；假模型下的 30+28 个测试和浏览器冒烟覆盖了这条路径。
 - **工作流的检查点没有清理机制**：`data/workflow_checkpoints.db` 会一直增长；同一线程被两个进程同时恢复的情形没有测。
