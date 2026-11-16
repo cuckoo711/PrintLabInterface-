@@ -266,3 +266,55 @@ def test_chat_endpoint_maps_gateway_failures_to_http_codes_without_leaking(clien
     assert r.status_code == 429
     assert client.post("/api/chat", json={"model": "nocolon", "messages": MSG}).status_code == 400
     assert client.post("/api/chat", json={"model": "oa:m", "messages": MSG, "reasoning_effort": "extreme"}).status_code == 422
+
+
+def test_production_settings_do_not_whitelist_the_test_host(tmp_path):
+    from printlab_interface.config import Settings
+    prod = Settings(data_dir=tmp_path / "d", printlab_root=None, printlab_url="http://127.0.0.1:9", http_timeout_s=0.5)
+    assert prod.extra_hosts == frozenset()
+    with TestClient(create_app(prod)) as c:
+        assert c.get("/healthz").status_code == 400  # TestClient sends Host: testserver
+        assert c.get("/healthz", headers={"host": f"127.0.0.1:{prod.port}"}).status_code == 200
+
+
+ODD_KEY = "zq9-unknown-shape-KEY-0123456789abcdef"  # matches none of the redactor's patterns
+
+
+def _gateway_with_key(tmp_path, key):
+    path = tmp_path / "scrub.db"
+    conn = db.connect(path); store.init(conn)
+    store.add_provider(conn, "oa", "t", "openai"); store.add_key(conn, "oa", "k", key); conn.close()
+    return path
+
+
+@pytest.mark.parametrize("echo", [ODD_KEY, ODD_KEY.upper(), ODD_KEY.lower(), __import__("urllib.parse", fromlist=["quote"]).quote(ODD_KEY + " x/y", safe="")])
+def test_an_upstream_error_that_echoes_the_key_never_reaches_the_caller_or_the_audit(tmp_path, echo):
+    path = _gateway_with_key(tmp_path, ODD_KEY)
+
+    def failing(**kw):
+        raise StatusError(500, f"Incorrect API key provided: {echo}. See docs.")
+
+    gw = Gateway(path, pool=KeyPool(), call=failing)
+    with pytest.raises(GatewayError) as exc:
+        gw.complete("oa:gpt-4o-mini", MSG)
+    assert ODD_KEY not in str(exc.value) and ODD_KEY.lower() not in str(exc.value).lower()
+    conn = db.connect(path)
+    dump = " ".join(str(dict(r)) for r in conn.execute("SELECT * FROM audit")); conn.close()
+    assert ODD_KEY.lower() not in dump.lower()
+
+
+def test_the_scrub_runs_even_when_the_error_text_is_long(tmp_path):
+    path = _gateway_with_key(tmp_path, ODD_KEY)
+
+    def failing(**kw):
+        raise StatusError(500, "x" * 280 + ODD_KEY)  # the key sits across the 300-char cut
+
+    with pytest.raises(GatewayError) as exc:
+        Gateway(path, pool=KeyPool(), call=failing).complete("oa:gpt-4o-mini", MSG)
+    assert ODD_KEY[:20] not in str(exc.value)
+
+
+def test_tp_style_keys_are_redacted_by_shape_as_a_second_line_of_defence():
+    from printlab_interface import redact
+    assert "FAKEFAKEFAKE" not in redact.redact("key tp-FAKEFAKEFAKE0123456789abcdef failed")
+    assert redact.redact("a tp-short is not a key") == "a tp-short is not a key"

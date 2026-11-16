@@ -8,6 +8,7 @@ _PATTERNS = [
     # Provider and Bambuddy style keys
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"), "sk-***"),
     (re.compile(r"\bbb_[A-Za-z0-9_\-]{8,}"), "bb_***"),
+    (re.compile(r"\btp-[A-Za-z0-9_\-]{16,}"), "tp-***"),
     (re.compile(r"\bBearer\s+[A-Za-z0-9._\-]{8,}", re.I), "Bearer ***"),
     # key=value / "key": "value" for sensitive names
     (

@@ -260,3 +260,35 @@ def test_tool_message_validation_in_the_model_gateway():
     with pytest.raises(GatewayError, match="content"):
         _validate_messages([{"role": "assistant", "content": None}])
     _validate_messages([{"role": "assistant", "content": None, "tool_calls": [{"id": "1"}]}])
+
+
+def test_cancel_arriving_during_a_model_call_wins_over_a_plain_text_reply(world):
+    """The user pressed cancel while the model was thinking; the reply that comes back must not turn the run into 'done'."""
+    c = Cancel()
+    original = world.runner.models.complete
+
+    def cancel_mid_call(*a, **k):
+        out = original(*a, **k)
+        c.set()  # cancel lands after the request left, before the reply is handled
+        return out
+
+    world.runner.models.complete = cancel_mid_call
+    world.replies.append(reply("an answer the user no longer wants"))
+    r = world.runner.run(agent(), "hi", cancel=c)
+    assert r.status == "cancelled"
+    assert r.turns == 1
+
+
+def test_cancel_during_a_model_call_that_asks_for_tools_runs_none_of_them(world):
+    c = Cancel()
+    original = world.runner.models.complete
+
+    def cancel_mid_call(*a, **k):
+        out = original(*a, **k)
+        c.set()
+        return out
+
+    world.runner.models.complete = cancel_mid_call
+    world.replies.append(reply(None, [tool_call("c1", "printlab_status")]))
+    r = world.runner.run(agent(), "hi", cancel=c)
+    assert r.status == "cancelled" and world.cli_calls == []

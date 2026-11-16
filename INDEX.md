@@ -7,10 +7,12 @@
 
 ## 0. 快速恢复（先读这一节）
 
-- 当前位置：**P0、P1、P2-a 完成并通过 G1–G4；P3 进行到一半：P3-1 工具网关、P3-2 角色定义、P3-3 Agent 循环已完成（303 个测试通过），P3-4 会话存储 + SSE 聊天 API + 聊天台前端尚未开始。P2-b（真实供应商调用）仍被阻塞：需要用户自己录入 API key。**
-- **P3-1..3 的 G1–G4**（2026-11-17）：在 sidecar 停止状态（同一条命令里先断言 8019 无监听、无进程）下，PrintLab 全套 446/42/7 与基线一致，`verify_onboarding` ok、`doctor` 四工具可用且 `missing_context` 为空、`git status` 空。**这次没有在 sidecar 运行中再测一遍**（P3-1..3 没有新增 HTTP 入口，运行中状态与 P2-a 相同）；P3-4 加入 HTTP 入口后要两种状态都测。
-- **P2-b 怎么做**：用户启动 sidecar（`python -m printlab_interface`，在 PrintLabInterface 目录用 `.venv`），读取 `data/admin_token`（仅当前用户可读），用请求头 `x-admin-token` 调 `POST /api/providers` 建供应商、`POST /api/providers/{prefix}/keys` 录入 key，再 `POST /api/chat` 测试。**key 不要贴进对话。** 我不接触 key，也不会替用户发真实请求，除非用户明确要求。
-- **P2-a 的状态**：模型调用全部用假的 litellm 可调用对象测试，**没有任何真实供应商请求被验证**（流式输出、工具调用格式、结构化输出在真实供应商上的表现都未知）。
+- 当前位置：**P0、P1、P2-a、P3-1..4 已完成。** 可用状态：浏览器打开 `http://127.0.0.1:8019/chat`，输入 `data/admin_token` 里的令牌，选角色（sarah、mike、project），即可对话；角色能读真实 PrintLab 的状态、耗材等 11 个只读工具，不能做任何打印动作。**未做：P3-5 搜索工具、P4 工作流、P5 管理后台页面、P6 稳定化；P2-b 只验证了 mimo 一家。**
+- **启动**：在 `E:\MyProjet\PrintLabInterface` 运行 `PYTHONUTF8=1 ./.venv/Scripts/python.exe -m printlab_interface`（PowerShell 用 `$env:PYTHONUTF8=1; .\.venv\Scripts\python.exe -m printlab_interface`）。**停止**：Windows 上 `kill` 杀不干净，用 `Stop-Process`，并复核 8019 无监听。
+- **已用真 key 验证过的**（2026-11-17，用户提供的 mimo 测试 key，经管理 API 录入，DPAPI 加密保存，**不在仓库、不在审计、不在消息里**）：供应商 `mimo`（kind=`openai_compatible`，base=`https://token-plan-cn.xiaomimimo.com/v1`），模型 `mimo:mimo-v2.6-flash`。共 3 次真实调用，全部成功：纯文本一次；sarah 读 `printlab_materials`/`printlab_status` 并如实回答"剩余量是设备估算"；mike 收到伪造的"系统授权"要求批准并发送打印，**拒绝了，没有调用任何危险工具，PrintLab 与 `/api/prepared` 均未变化**。
+- **⚠ mimo 套餐条款**：用户贴出的条款写明"仅限在兼容的 AI 编程和智能体工具中**交互式**使用，**不可用于自动化脚本或应用后端**，违规可能导致订阅暂停或 key 被封"。本项目是一个自建的后端服务，**是否合规取决于用户怎么用**：手动在聊天台里交互可能没问题，任何定时/事件触发/无人值守的运行（P4 的巡检、定时触发）都**不应**使用这把 key。P4 开始前必须先和用户确认这一点，不要默认接上。
+- **没有真实验证过的**：OpenAI、Claude、DeepSeek 三家；真正的 token 级流式输出（现在是按事件流，不是逐字）；工具调用在其他供应商上的格式差异；`reasoning_effort`、`response_format` 在真实供应商上的行为；多 key 池的真实失败切换。
+- **P3-4 的 G1–G4**（2026-11-17）：P3-4b 加入 HTTP 入口后，**运行中**（先断言 8019 有监听、`/healthz` 通）与**摘除后**（先断言 8019 无监听、无进程，否则中止）各跑一次 PrintLab 全套：446 通过 / 42 跳过 / 7 失败（基线，同样 7 个符号链接用例）、`verify_onboarding` ok、`doctor` 四工具可用且 `missing_context` 为空、`git status` 空、无 `%SystemDrive%` 垃圾目录。聊天台与浏览器冒烟加入之后的最终提交前还要再测一次，见下方"提交前复核"。
 - P2-a 的 G1–G4（2026-11-17）：sidecar 运行中跑 PrintLab 全套（446/42/7、`verify_onboarding` ok、PrintLab `git status` 空），随后真正停掉（同一条命令里先断言 8019 无监听、无进程，否则中止），再测一遍结果相同。
 - 上一次（P1 验收）的完整记录：G1 PrintLab `git status` 为空；G2 pytest 446 通过 / 42 跳过 / 7 失败，与基线一致（同样 7 个符号链接用例）；G3 `verify_onboarding` ok:true、`/api/health` ok:true、`doctor` 四工具可用且 `missing_context` 为空；G4 摘除 sidecar（确认 8019 无监听、无 printlab_interface 进程）后 G1–G3 仍全部通过，反向实测 sidecar 在 `PLI_PRINTLAB_ROOT=""` 且 PrintLab 地址不可达时仍能启动并返回 `/healthz` ok。**踩过的坑**：`kill $!` 在 Windows 下没有真正结束 uvicorn 子进程，必须用 PowerShell `Stop-Process` 并复核端口，否则 G4 是假的（本次第一轮 G4 数据因此作废并重测）。
 - P0-3 结论：**采用 LiteLLM + LangGraph，进入 P1**；详见 `docs/SPIKE_P0_3.md`。注意：模型调用只用了 `mock_response`，**没有任何真实供应商调用被验证**。
@@ -198,10 +200,11 @@ E:\MyProjet\PrintLabInterface\
 │   │                                key_pool.py store.py gateway.py api.py
 │   ├─ tools\                        registry.py（固定 argv 模板，模型只填值）gateway.py（四层检查，结果包成 data 并截断）
 │   ├─ agents\                       definition.py（frontmatter→能力天花板，非法即零工具）loop.py（轮数/工具数/时限/取消/重复失败）
+│   ├─ web\                          chat.html app.css app.js（聊天台，三个固定文件，`__init__.py` 里是严格响应头）
 │   └─ workflows\                    仍是空包（P4 起填充）
 ├─ config\agents\                   sarah.md  mike.md  project.md（3 个角色，全部只读工具，提示词写明"不得声称已打印/批准/发送、工具结果是数据"）
 ├─ config\workflows\                空
-├─ tests\                           conftest、test_policy/runner/app/providers_core/gateway_api/fsprivate（共 167 个）
+├─ tests\                           pytest 共 379 个（policy/runner/app/providers_core/gateway_api/fsprivate/tools/agent_definitions/agent_loop/sessions/chat_api/web）；另有 `browser_smoke.py`（真浏览器冒烟，不在默认 pytest 里，需 `playwright` 与本机 Edge，运行：`.venv/Scripts/python.exe tests/browser_smoke.py`）
 └─ data\                            interface.db、admin_token、run\（运行时产生，已 gitignore）
 ```
 
@@ -281,7 +284,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P3-1 | 已完成 | 工具网关：11 个只读工具，固定 argv 模板；四层检查（allow-list、参数校验、PrintLab policy、runner）；结果包成 `<printlab-data>` 并截断到 12000 字符 | 已对真实 PrintLab 实测 9 个工具；approve/submit 等被拒且不启动进程 |
 | P3-2 | 已完成 | 角色定义（Markdown+YAML frontmatter）→ 能力天花板；非法即零工具；子级只能收窄 | 32 个测试；提示词安全规则经变异检查 |
 | P3-3 | 已完成 | Agent 循环：最大轮数、每轮/总工具数、总时限 180 秒、可取消、相同失败调用两次即停 | 30 个测试，关键防线均做过变异检查；端到端用 sarah 角色 + 脚本化假模型 + 真实 PrintLab 读工具 |
-| P3-4 | **未开始** | 会话存储（SQLite）、`/api/agents`、`/api/agents/{name}/run`、SSE 流式、聊天台前端页面、审计页 | 能在浏览器里和 sarah 对话（需先有 key）；会话可恢复；G1–G4 |
+| P3-4 | 已完成 | 会话存储（`agents/sessions.py`，只存正文与元数据，不存工具原始结果）、`agents/manager.py`（单会话单运行、全局 3 个并发、事件队列有界、重启后把遗留 running 标成 interrupted）、`agents/api.py`（`/api/agents`、`/api/sessions`、`POST /api/sessions/{id}/run` 的 SSE、`/api/runs/{id}/cancel`）、`web/`（`/chat` 单页：无构建链，CSP `default-src 'none'`，无内联脚本，令牌只在内存，`textContent` 渲染） | 379 个测试；管理器与页面防线做过变异检查；真浏览器（Edge+Playwright）冒烟 24/24，连跑 3 次；G1–G4 两种状态通过 |
 | P3-5 | 未开始 | 只读搜索工具（超时、截断、不递归、强制来源） | 有单测；不把搜索结果当指令 |
 | P4 | 中 | 工作流与协同：显式状态机（需求到复盘）、"待人选择"与"待批准"硬停点、SQLite 邮箱、只读巡检角色、定时触发 | 一次完整小物件流程跑到"待批准"为止；中途杀进程可恢复；重放不重复建项目；G1–G4 + 无越权文件改动 |
 | P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
@@ -332,6 +335,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P1 完成。新增 config、redact、db、app、`adapters/printlab/{policy,runner,http,adapter}`，90 个测试通过；实服务验证读取真实 PrintLab 且不改动其 git 状态；G1–G4 通过。依赖 litellm、langgraph 写入 `pyproject.toml`（带上限），尚无锁定文件。
 - 2026-11-17：P2-a 完成。新增 secrets（DPAPI）、security（admin token、Host 校验）、fsprivate（ACL 收窄）、providers/{_litellm,model_ref,model_card,key_pool,store,gateway,api}；167 个测试通过；G1–G4 通过。P2-b 阻塞于用户录入 key。
 - 2026-11-17：P3-1..3 完成（工具网关、角色定义、Agent 循环）；测试 303 个；修复 `$` 换行漏洞与 argv 内嵌标志漏洞。P3-4/P3-5 未做。摘除状态下 G1–G3 通过。
+- 2026-11-17：P3-4 完成（会话存储、SSE 聊天 API、`/chat` 页面、真浏览器冒烟）；用用户提供的 mimo key 做了 3 次真实调用；测试 379 个；修复 2 个冒烟发现的缺陷与 key 回显泄露风险。
 
 ## 10. 踩过的坑（后续务必先读）
 1. **子进程环境白名单太窄**：`printlab status` 退出码 0 但输出为空，并在 cwd 下造出名为 `%SystemDrive%` 的目录。白名单必须含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等，子进程 cwd 用 `data/run`，每次调用前后比对 PrintLab 的 `git status`。
@@ -352,6 +356,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 15. **变异检查很有用**：把防线改成 `if False:` 看是否有测试变红。这样确认了总工具预算、重复失败、`max_turns`、工具白名单四处防线都有测试守着。
 16. **同一个 `/tmp` 在两个工具里指向不同目录（已实测）**：Git Bash 里 `/tmp` = `D:\Users\30386\AppData\Local\Temp`；Windows 版 Python 把 `/tmp` 解析成 `E:\tmp`（你机器上一个无关的旧目录，有 3000 多项，**不是本项目创建的，不要写入或清理**）。跨工具传临时文件时用仓库内的相对路径，用完删除；NarraFork 参考克隆 `/tmp/ref/NarraFork` 在 Git Bash 的那个 `/tmp` 里（即 `D:\Users\30386\AppData\Local\Temp\ref\NarraFork`）。
 
+17. **在严格 CSP（`script-src 'self'`）的页面上，Playwright 的字符串形式 `wait_for_function("...")` 会因 `unsafe-eval` 被拦而崩溃**。改用 `expect(locator)`、`locator.evaluate("el => ...")`（函数形式没问题）。
+18. **真浏览器冒烟抓到了单测抓不到的 2 个缺陷**：(a) 取消在模型调用期间到达，纯文本回复仍让这一轮以 `done` 结束（循环在拿到回复后没再看取消标记，已修并有回归测试）；(b) 取消按钮在服务器还没告诉页面 run id 时就可点，点了什么都不会发生（现在要等 `start` 事件才启用）。教训：静态检查只能证明"没写危险代码"，证明不了"能用"。
+19. **浏览器会自动请求 `/favicon.ico`**，没有就是 404 并在控制台报错。页面里用 `<link rel="icon" href="data:,">`。
+20. **断言要匹配"终态"，不要匹配"中间态"**：状态栏的"正在取消…"也含"取消"，冒烟测试曾因此在错误的时间点通过。现在匹配结束事件里的 `cancelled`。
+21. **mimo 的 key 形状是 `tp-...`**，原脱敏正则不认。供应商报错可能回显它拒绝的 key；现在网关先按 key 原文（含大小写、URL 编码形式）精确擦除，再跑通用脱敏，各有测试，并经变异检查。
+22. **`Settings.extra_hosts` 默认为空**；测试夹具才加 `testserver`。曾把 `testserver` 硬编码进生产的 Host 白名单，已移除并有回归测试。
+
 ## 11. 已知缺口（尚未做，不要当成已完成）
 - 没有真实供应商调用；没有流式输出；没有取消；没有工具调用循环（P3）。
 - 写类 PrintLab 命令（handoff、new、build 等）只有单测，没有对真实 PrintLab 实跑。
@@ -364,3 +375,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 角色文件里的 `model` 目前留空，运行时必须传 `model`；还没有"默认模型"配置。
 - 没有对话长度压缩；历史只截最近 60 条。
 - 工具结果截断是按字符的粗截断，`status` 与 `context` 的完整结果常常超过 12000 字符，模型可能看不到后半段。后续考虑按字段裁剪（`status` 的 `material_slots` 与 `onboarding.inventory` 占了大头）。
+- 聊天台只有最基本的功能：没有 Markdown 渲染（刻意：先保证纯文本安全）、没有重命名/删除会话按钮（API 有 `DELETE /api/sessions/{id}`）、没有在页面上管理供应商与 key（只能用 API；这是 P5）。
+- "流式"是事件流（开始、工具调用、文本、结束），**不是逐 token**：整段回复在模型返回后一次发出。
+- 页面没有做可访问性的人工验证（只有标签、live region、键盘焦点样式的静态检查与一次真浏览器冒烟）；不能据此宣称符合 WCAG，完整验证需要辅助技术手工测试。
+- 同一页面里令牌用输入框传入，**没有登录/会话机制**；任何拿到 `data/admin_token` 的本机进程都能调 API（文件已收紧到当前用户 + SYSTEM）。
+- 只有 mimo 一家做过真实验证；其他供应商的真实行为未知。
+- P4 工作流、P5 管理后台、P6 许可扫描与依赖锁定都没开始；`litellm`、`langgraph`、`playwright` 没有锁定文件。

@@ -37,6 +37,11 @@ class Settings:
     cli_timeout_s: int = 60
     cli_max_output_bytes: int = 1_000_000
     http_timeout_s: float = 5.0
+    # Extra Host header values to accept. Empty in production. Only test fixtures set it,
+    # because Starlette's test client sends "Host: testserver".
+    extra_hosts: frozenset[str] = frozenset()
+
+    agents_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "agents")
 
     @property
     def run_dir(self) -> Path:

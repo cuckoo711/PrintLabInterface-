@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrintLabInterface</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/chat/app.css">
+</head>
+<body>
+<header>
+  <h1>PrintLabInterface</h1>
+  <span id="conn" class="pill">未连接</span>
+</header>
+
+<section id="gate">
+  <p>输入管理令牌后继续。令牌在 <code>data/admin_token</code> 里。它只保存在这个页面的内存中，刷新页面后需要重新输入。</p>
+  <form id="gate-form" autocomplete="off">
+    <label for="token">管理令牌</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false" required>
+    <button type="submit">连接</button>
+  </form>
+  <p id="gate-error" class="error" role="alert" hidden></p>
+</section>
+
+<main id="app" hidden>
+  <aside>
+    <label for="agent">角色</label>
+    <select id="agent"></select>
+    <label for="model">模型（prefix:model，留空用角色文件里的）</label>
+    <input id="model" type="text" placeholder="例如 mimo:mimo-v2.6-flash" spellcheck="false">
+    <button id="new-session" type="button">新会话</button>
+    <h2>会话</h2>
+    <ul id="sessions"></ul>
+  </aside>
+  <section id="chat">
+    <div id="log" role="log" aria-live="polite"></div>
+    <form id="composer" autocomplete="off">
+      <label for="message" class="sr">消息</label>
+      <textarea id="message" rows="3" maxlength="8000" placeholder="输入消息，Ctrl+Enter 发送" required></textarea>
+      <div class="row">
+        <button id="send" type="submit">发送</button>
+        <button id="cancel" type="button" disabled>取消</button>
+        <span id="state" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+</main>
+<script src="/chat/app.js"></script>
+</body>
+</html>

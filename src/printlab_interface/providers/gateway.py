@@ -12,7 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from urllib.parse import quote
+
 from .. import db
+from ..redact import redact
 from . import model_card, store
 from ._litellm import litellm
 from .key_pool import Fault, KeyEntry, KeyPool
@@ -48,6 +51,16 @@ class CallResult:
     cost_usd: float | None = None
     warnings: list[str] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)  # [{"id", "name", "arguments"}]
+
+
+def _scrub(text: str, secrets_: list[str]) -> str:
+    """Remove every occurrence of each known secret, including common transformed forms."""
+    for secret in secrets_:
+        if not secret or len(secret) < 8:
+            continue
+        for form in {secret, secret.lower(), secret.upper(), quote(secret, safe="")}:
+            text = text.replace(form, "***")
+    return text
 
 
 def _status_of(exc: Exception) -> int | None:
@@ -110,6 +123,17 @@ class Gateway:
         conn = db.connect(self.db_path)
         store.init(conn)
         return conn
+
+    @staticmethod
+    def _secrets_in_use(conn: sqlite3.Connection, prefix: str) -> list[str]:
+        """Plaintext keys of this provider, held only long enough to scrub an error message."""
+        out: list[str] = []
+        for row in conn.execute("SELECT id FROM provider_keys WHERE prefix=?", (prefix,)).fetchall():
+            try:
+                out.append(store.reveal_key(conn, row["id"]))
+            except Exception:  # noqa: BLE001 - an unreadable key cannot be echoed back anyway
+                continue
+        return out
 
     def card_for(self, model_value: str) -> model_card.ModelCard:
         ref = parse(model_value)
@@ -185,7 +209,10 @@ class Gateway:
                         store.set_key_state(conn, entry.id, invalid=True)
                     db.record_audit(conn, "gateway", "model_call", f"{ref.prefix}:{ref.model}", f"error:{type(exc).__name__}",
                                     f"status={status} fault={fault.kind} attempt={attempt}")
-                    last_error = GatewayError(f"{type(exc).__name__}: {str(exc)[:300]}", status=status,
+                    # Upstream errors sometimes echo the credential they rejected. Erase the exact key
+                    # text first (works for any key shape), then run the general redactor on top.
+                    safe = redact(_scrub(str(exc), self._secrets_in_use(conn, ref.prefix)))[:300]
+                    last_error = GatewayError(f"{type(exc).__name__}: {safe}", status=status,
                                               retryable=fault.kind in {"rate_limited", "quota", "forbidden", "invalid"})
                     if self.pool.should_try_next_key(fault, output_started=False) and attempt < MAX_ATTEMPTS:
                         continue

@@ -8,11 +8,16 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from . import __version__, db, redact, security
+from . import __version__, db, redact, security, web
 from .adapters.printlab import PrintLabAdapter
+from .agents import api as agents_api
+from .agents.definition import load_dir
+from .agents.loop import AgentRunner
+from .agents.manager import RunManager
 from .config import Settings, load_settings
 from .providers import api as providers_api
 from .providers.gateway import Gateway
+from .tools.gateway import ToolGateway
 
 log = logging.getLogger("printlab_interface")
 
@@ -31,6 +36,12 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
             db.record_audit(conn, "system", "startup", "service", "ok", f"version={__version__}")
         app.state.adapter = adapter or PrintLabAdapter(settings)
         app.state.gateway = gateway or Gateway(settings.db_path)
+        app.state.agents = load_dir(settings.agents_dir)
+        tool_gateway = ToolGateway(app.state.adapter.runner, audit_db=lambda: db.connect(settings.db_path))
+        app.state.runs = RunManager(settings.db_path, AgentRunner(app.state.gateway, tool_gateway))
+        interrupted = app.state.runs.recover()
+        if interrupted:
+            log.warning("marked %d unfinished run(s) from a previous process as interrupted", interrupted)
         log.info("admin token stored at %s (not logged)", settings.data_dir / security.TOKEN_FILE)
         try:
             yield
@@ -47,7 +58,7 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
         problems = [{"loc": list(e.get("loc", [])), "msg": str(e.get("msg", "invalid value")), "type": e.get("type", "")}
                     for e in exc.errors()]
         return JSONResponse({"detail": problems}, status_code=422)
-    app.add_middleware(security.HostGuard, hosts=security.allowed_hosts(settings.port) | {"testserver"})
+    app.add_middleware(security.HostGuard, hosts=security.allowed_hosts(settings.port) | set(settings.extra_hosts))
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -68,4 +79,6 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
             return db.recent_audit(conn, limit)
 
     app.include_router(providers_api.router)
+    app.include_router(agents_api.router)
+    app.include_router(web.router)
     return app

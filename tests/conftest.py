@@ -13,4 +13,5 @@ def settings(tmp_path):
         printlab_root=None,
         printlab_url="http://127.0.0.1:9",  # nothing listens on the discard port
         http_timeout_s=0.5,
+        extra_hosts=frozenset({"testserver"}),
     )

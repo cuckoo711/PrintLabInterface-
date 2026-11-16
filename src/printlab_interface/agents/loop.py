@@ -111,6 +111,9 @@ class AgentRunner:
                 return finish("error", str(exc)[:300], turn - 1)
             for key in usage:
                 usage[key] += int(result.usage.get(key) or 0)
+            if cancel is not None and cancel.is_set:
+                # The user cancelled while the model was answering. Keep the tokens spent, drop the reply and any tool requests.
+                return finish("cancelled", turns=turn)
             calls = _calls_of(result)
             if result.text:
                 text = result.text

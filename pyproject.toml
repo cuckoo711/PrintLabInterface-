@@ -18,12 +18,16 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
+browser = ["playwright>=1.50,<2"]  # only for tests/browser_smoke.py; also needs Microsoft Edge or a Playwright Chromium
 
 [project.scripts]
 printlab-interface = "printlab_interface.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"printlab_interface.web" = ["*.html", "*.css", "*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
