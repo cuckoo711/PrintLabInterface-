@@ -7,8 +7,8 @@
 
 ## 0. 快速恢复（先读这一节）
 
-- 当前位置：**P0 全部完成（P0-1 到 P0-4），G1–G4 实测通过。下一阶段 P1（只读适配器）待用户确认后开始。**
-- G1–G4 实测记录（2026-11-17）：G1 PrintLab `git status` 为空；G2 pytest 446 通过 / 42 跳过 / 7 失败，与基线完全一致，失败的仍是同样 7 个符号链接用例；G3 `verify_onboarding` ok:true、`/api/health` ok:true、`doctor` 四个工具可用且 `missing_context` 为空、`printer_configured` 为 true；G4 测试时没有任何 PrintLabInterface 进程，8019 无监听。**G4 的局限：** 目前 PrintLabInterface 还没有可运行的服务，所以这次"摘除测试"只证明了旧项目不依赖新仓库，不能证明将来服务运行后被摘除时的行为，P1 起每阶段要重做。
+- 当前位置：**P0、P1 全部完成并通过 G1–G4。下一阶段 P2（供应商与模型）。** P2 的真实供应商调用需要用户自己填入 API key，开始 P2 前要先问用户。
+- 最近一次 G1–G4 实测（P1 验收，2026-11-17，**sidecar 运行中与真正停掉后各测一次**）：G1 PrintLab `git status` 为空；G2 pytest 446 通过 / 42 跳过 / 7 失败，与基线一致（同样 7 个符号链接用例）；G3 `verify_onboarding` ok:true、`/api/health` ok:true、`doctor` 四工具可用且 `missing_context` 为空；G4 摘除 sidecar（确认 8019 无监听、无 printlab_interface 进程）后 G1–G3 仍全部通过，反向实测 sidecar 在 `PLI_PRINTLAB_ROOT=""` 且 PrintLab 地址不可达时仍能启动并返回 `/healthz` ok。**踩过的坑**：`kill $!` 在 Windows 下没有真正结束 uvicorn 子进程，必须用 PowerShell `Stop-Process` 并复核端口，否则 G4 是假的（本次第一轮 G4 数据因此作废并重测）。
 - P0-3 结论：**采用 LiteLLM + LangGraph，进入 P1**；详见 `docs/SPIKE_P0_3.md`。注意：模型调用只用了 `mock_response`，**没有任何真实供应商调用被验证**。
 - **必读的坑**：调用 PrintLab CLI 时，子进程环境变量白名单太窄会导致"退出码 0 但输出为空"，并在当前工作目录创建名为 `%SystemDrive%` 的垃圾目录，使 PrintLab 的 `git status` 变脏（违反 G1）。已在临时目录复现并确认因果，白名单必须包含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等（完整清单见 `docs/spike_p0_3.py` 的 `ENV_ALLOW`），子进程 `cwd` 不得设为 PrintLab 根。
 - 下一步动作：P0-4 复核 G1–G4；然后进入 P1（只读适配器），按 `docs/SPIKE_P0_3.md` §5 的四条要求实现。
@@ -159,26 +159,39 @@ PrintLab 的 `Runtime/venv` 写入了绝对路径（搬动后 venv 失效需重�
 - [x] 第三步：集成原则（§1.3、§1.4）。
 - [x] 第四步：集成技术方案（§6）。
 - [x] P0-1：旧项目基线与 HTTP 路由全清单（§2.2）。
-- [x] P0-2：新仓库骨架。内容：`git init -b main`（**尚无任何提交**）、`pyproject.toml`、`src/printlab_interface/{__init__,adapters/printlab,providers,agents,tools,workflows}`、`config/{agents,workflows}`、`tests`、`docs`、`data/.gitkeep`、`.gitignore`、`.venv`（Python 3.13.13，prefix 在仓库内）。已装：fastapi 0.163.1、uvicorn 0.54.0、httpx 0.28.1、pytest 9.2.0，包以 editable 方式安装并可 import。
+- [x] P0-2：新仓库骨架（独立 git、`pyproject.toml`、包目录、`.venv`）。
+- [x] P0-3：Spike（`docs/SPIKE_P0_3.md`）：采用 LiteLLM + LangGraph；模型调用仅 mock。
+- [x] P0-4：G1–G4 复核通过。
+- [x] **首次提交并推送**：`0c8a2bd`，作者 `cuckoo711 <3038604221@qq.com>`（来自本机环境变量 GIT_AUTHOR_*，未改 git config）。远端 `origin` = `git@github.com:cuckoo711/PrintLabInterface-.git`（注意仓库名末尾有一个 `-`），分支 `main`。
+- [x] **P1 只读适配器与骨架**：
+  - `config.py`：环境变量 `PLI_*`；只允许回环地址；`PLI_PRINTLAB_ROOT=""` 表示不使用 PrintLab。
+  - `redact.py`：日志与审计脱敏（sk-、bb_、Bearer、api_key/access_code/password/token=、192.168.x.x）。
+  - `db.py`：自有 SQLite（WAL），`meta` 与 `audit` 两表。
+  - `adapters/printlab/policy.py`：三层策略（READ / WRITE / NEVER），NEVER 无条件拒绝且优先；HTTP 只 GET 且路径白名单，`/api/prepared*` 永久拒绝；拒绝 `--execute/--send/--start`。
+  - `adapters/printlab/runner.py`：子进程执行器（环境白名单、`cwd`=自己的 `data/run`、超时、输出上限、并发上限 2、空输出视为错误、调用前后比对 PrintLab 的 git 状态，读调用改动树或写调用留下未跟踪文件即拒绝后续写调用）。
+  - `adapters/printlab/http.py`、`adapter.py`：只读 HTTP、能力探测、离线降级。
+  - `app.py`、`__main__.py`：`/healthz`、`/api/printlab`、`/api/printlab/status`、`/api/audit`；端口 8019；PrintLab 缺失仍可启动。
+  - 测试 90 个（`tests/test_policy.py`、`test_runner.py`、`test_app.py`），全部通过。
 
 ### 4.2 进行中
-- [ ] **P0-3 Spike**：尚未开始写代码。
+- 无。下一步 P2 需要先问用户要不要现在开始、以及用哪几家供应商（key 由用户自己填入）。
 
 ### 4.3 当前仓库文件导航（PrintLabInterface）
 ```
 E:\MyProjet\PrintLabInterface\
-├─ INDEX.md                      本文件
-├─ pyproject.toml                依赖：fastapi、uvicorn、httpx；test 额外：pytest
-├─ .gitignore                    忽略 .venv、data/*（保留 .gitkeep）、config/*.local.*、.env*
-├─ .venv\                        独立虚拟环境（不进 git）
+├─ INDEX.md                         本文件
+├─ pyproject.toml                   fastapi、uvicorn、httpx、litellm>=1.109,<2、langgraph>=1.2,<2；test: pytest；脚本 printlab-interface
+├─ .gitignore                       忽略 .venv、data/*（保留 .gitkeep）、config/*.local.*、.env*
+├─ .venv\                           独立虚拟环境（不进 git）
+├─ docs\SPIKE_P0_3.md、spike_p0_3.py   P0-3 结论与可重跑脚本
 ├─ src\printlab_interface\
-│   ├─ __init__.py               版本 0.0.1
-│   ├─ adapters\printlab\        ★ 唯一允许知道 PrintLab 存在的地方（目前为空目录）
-│   ├─ providers\ agents\ tools\ workflows\   空包
+│   ├─ __init__.py（版本 0.1.0）  __main__.py  app.py  config.py  db.py  redact.py
+│   ├─ adapters\printlab\            ★ 唯一允许知道 PrintLab 的地方：policy.py runner.py http.py adapter.py
+│   └─ providers\ agents\ tools\ workflows\   仍是空包（P2 起填充）
 ├─ config\agents\  config\workflows\          空
-├─ tests\  docs\  data\.gitkeep
+├─ tests\                           conftest.py test_policy.py test_runner.py test_app.py（90 个）
+└─ data\                            interface.db、run\（运行时产生，已 gitignore）
 ```
-注意：`src/printlab_interface/adapters/__init__.py` 已建；`adapters/printlab/` 下尚无 `__init__.py`。
 
 ---
 
@@ -186,7 +199,7 @@ E:\MyProjet\PrintLabInterface\
 
 ### 5.1 待用户确认
 1. **NarraFork 临时克隆（`/tmp/ref/NarraFork`，236 MB）保留还是清理？** 尚未回答；默认暂不删除。
-2. **PrintLabInterface 的 Git 身份**：仓库未配置 `user.name`/`user.email`。提交需要身份；我不会修改 git config，需要用户指定或授权使用 `git -c` 临时身份。且**用户尚未要求提交**，所以目前不提交。
+2. ~~Git 身份~~：已解决。环境变量 GIT_AUTHOR_*/GIT_COMMITTER_* 已提供身份（cuckoo711），用户已明确要求提交并推送，且给出了两个远端地址。
 3. 许可：PrintLabInterface 本身用什么许可？尚未决定。不得拷贝 PrintLab 代码或文档（其为 PolyForm Noncommercial，需保留署名与非商用条款）；文档里标注对 PrintLab 的运行时依赖。
 4. 开启 Windows 开发者模式后重跑 PrintLab 测试，把 7 个符号链接用例纳入基线？（需要用户在系统设置中操作。）
 5. 模型供应商的 key（OpenAI、Claude、DeepSeek 等）由用户自己填入，我不接触。何时进入 P2 由用户决定。
@@ -250,7 +263,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | --- | --- | --- | --- |
 | P0-3 | 已完成 | Spike：LiteLLM + LangGraph 两节点图 | 已跑通（模型调用仅 mock）；结论见 `docs/SPIKE_P0_3.md`：采用 LiteLLM + LangGraph |
 | P0-4 | 已完成 | 复核 G1 到 G4 | 四项实测通过，见 §0 |
-| P1 | **高（下一步）** | 骨架与只读适配器：FastAPI 应用、SQLite、配置加载、日志脱敏；`adapters/printlab` 实现 health/overview/device/projects 与 CLI 读命令；能力探测；**拒绝列表单测**。另需：litellm、langgraph 写入 `pyproject.toml`（带上限版本范围）；按 `docs/SPIKE_P0_3.md` §5 做四项：环境变量白名单含 Windows 系统变量并有"最小可运行集"测试、子进程 `cwd` 用 Interface 自己的 `data/run/`（先验证 CLI 不依赖 cwd）、每次调用前后对 PrintLab 做 `git status --porcelain` 比对并在新增未跟踪文件时拒绝后续写调用、"退出码 0 且空输出"视为错误 | `/healthz` 与 `/api/printlab` 正常；PrintLab 离线时服务仍能启动；拒绝列表对 approve/submit/reconcile/studio-bridge/`/api/prepared` POST 全部返回拒绝；故意缩窄环境变量的测试能被检测并报错；G1–G4，且这次 G4 要在服务实际运行后停掉再测 |
+| P1 | 已完成 | 骨架与只读适配器（见 §4.1） | 90 个单测通过；实服务对真实 PrintLab 读到 H2C 状态；G1–G4 通过 |
 | P2 | 中 | 供应商与模型：CRUD、加密存储、key 池与失败分类、连通测试、模型卡三层合并、调用封装（取消、推理档位、输出上限、结构化输出）、用量记录 | 用户填入 key 后 OpenAI/Claude/DeepSeek 各完成一次真实调用；key 不出现在日志；G1–G4 |
 | P3 | 中 | 代理与聊天台：角色定义文件 + 权限天花板；工具网关（读、写文件类白名单）；Agent 循环；SSE 聊天前端；审计页；只读搜索工具 | Sarah、Mike 可对话并调用 status/materials/context；越权调用被拒并记录；会话可恢复；G1–G4 |
 | P4 | 中 | 工作流与协同：显式状态机（需求到复盘）、"待人选择"与"待批准"硬停点、SQLite 邮箱、只读巡检角色、定时触发 | 一次完整小物件流程跑到"待批准"为止；中途杀进程可恢复；重放不重复建项目；G1–G4 + 无越权文件改动 |
@@ -299,3 +312,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 ## 9. 变更记录
 - 2026-11-17：创建本文件。记录 PrintLab 初始化、H2C 接入、NarraFork 调研、方案 A/Python/P0 决策、P0-1 与 P0-2 完成状态。
 - 2026-11-17：P0-3 Spike 完成（`docs/SPIKE_P0_3.md`、`docs/spike_p0_3.py`）。发现并复现环境变量白名单过窄会产生 `%SystemDrive%` 垃圾目录污染 PrintLab 的 git 状态；已清理，G1 恢复。P0-4 完成，G1–G4 通过，P0 收尾。
+- 2026-11-17：P1 完成。新增 config、redact、db、app、`adapters/printlab/{policy,runner,http,adapter}`，90 个测试通过；实服务验证读取真实 PrintLab 且不改动其 git 状态；G1–G4 通过。依赖 litellm、langgraph 写入 `pyproject.toml`（带上限），尚无锁定文件。
