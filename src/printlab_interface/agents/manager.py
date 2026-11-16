@@ -134,7 +134,7 @@ class RunManager:
         finally:
             conn = self._conn()
             try:
-                if result.text and result.status in {"done", "max_turns", "timeout", "cancelled"}:
+                if result.text and result.status in {"done", "truncated", "max_turns", "timeout", "cancelled"}:
                     try:
                         sessions.add_message(conn, active.session_id, "assistant", result.text)
                     except sessions.SessionError:

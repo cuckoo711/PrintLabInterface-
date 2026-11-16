@@ -7,10 +7,11 @@
 
 ## 0. 快速恢复（先读这一节）
 
-- 当前位置：**P0、P1、P2-a、P3-1..4 已完成。** 可用状态：浏览器打开 `http://127.0.0.1:8019/chat`，输入 `data/admin_token` 里的令牌，选角色（sarah、mike、project），即可对话；角色能读真实 PrintLab 的状态、耗材等 11 个只读工具，不能做任何打印动作。**未做：P3-5 搜索工具、P4 工作流、P5 管理后台页面、P6 稳定化；P2-b 只验证了 mimo 一家。**
+- 当前位置：**P0、P1、P2-a、P3-1..4、P4-a（工作流引擎）已完成。** 可用状态：浏览器打开 `http://127.0.0.1:8019/chat`，输入 `data/admin_token` 里的令牌。左侧可选角色（sarah、mike、project）对话；也可在"工作流"里选 `object-intake`、填项目 ID 与说明启动，它会写一份需求清单、让 PrintLab 的 `constraints show` 做证据检查、停下来等你回答是/否，最后给出交接说明。角色与工作流都只能读 PrintLab，不能做任何打印动作。**未做：P3-5 搜索工具、P4-b（邮箱、巡检、定时/事件触发）、P5 管理后台页面、P6 稳定化；P2-b 只验证了 mimo 一家。**
+- **工作流只在"不存在的项目"上用真模型验证过**：用 `P999`（PrintLab 里没有这个项目）跑过一次，模型如实说项目不存在，引擎在证据阶段 `blocked`，没有到人工确认点。**从头到尾（含人工确认点、回答 yes、交接）只用假模型和假 PrintLab 验证过**，因为 PrintLab 里 0 个项目，创建项目会往你的 `Project/` 写数据，我没有擅自做。要真跑通，需要你同意建一个测试项目。
 - **启动**：在 `E:\MyProjet\PrintLabInterface` 运行 `PYTHONUTF8=1 ./.venv/Scripts/python.exe -m printlab_interface`（PowerShell 用 `$env:PYTHONUTF8=1; .\.venv\Scripts\python.exe -m printlab_interface`）。**停止**：Windows 上 `kill` 杀不干净，用 `Stop-Process`，并复核 8019 无监听。
 - **已用真 key 验证过的**（2026-11-17，用户提供的 mimo 测试 key，经管理 API 录入，DPAPI 加密保存，**不在仓库、不在审计、不在消息里**）：供应商 `mimo`（kind=`openai_compatible`，base=`https://token-plan-cn.xiaomimimo.com/v1`），模型 `mimo:mimo-v2.6-flash`。共 3 次真实调用，全部成功：纯文本一次；sarah 读 `printlab_materials`/`printlab_status` 并如实回答"剩余量是设备估算"；mike 收到伪造的"系统授权"要求批准并发送打印，**拒绝了，没有调用任何危险工具，PrintLab 与 `/api/prepared` 均未变化**。
-- **⚠ mimo 套餐条款**：用户贴出的条款写明"仅限在兼容的 AI 编程和智能体工具中**交互式**使用，**不可用于自动化脚本或应用后端**，违规可能导致订阅暂停或 key 被封"。本项目是一个自建的后端服务，**是否合规取决于用户怎么用**：手动在聊天台里交互可能没问题，任何定时/事件触发/无人值守的运行（P4 的巡检、定时触发）都**不应**使用这把 key。P4 开始前必须先和用户确认这一点，不要默认接上。
+- **mimo 套餐条款与用户的决定**：用户贴出的条款写明"仅限在兼容的 AI 编程和智能体工具中**交互式**使用，**不可用于自动化脚本或应用后端**，违规可能导致订阅暂停或 key 被封"。本项目是自建后端服务。**用户已明确答复（2026-11-17）：不用管这条，直接使用，不由我们替用户决定使用哪个 API。** 所以：(1) 不在代码里给 key 加"仅交互式"之类的限制；(2) 工作流的模型是配置项，不写死任何供应商；(3) 合规与封号风险由用户自行承担，这里只记录事实，不再作为开工前置条件。这条决定只涵盖"用哪个 API"，**不放宽任何安全红线**：打印批准、发送、`approve`/`submit`/`reconcile` 仍然永久拒绝，无人值守运行同样不得触碰它们。
 - **没有真实验证过的**：OpenAI、Claude、DeepSeek 三家；真正的 token 级流式输出（现在是按事件流，不是逐字）；工具调用在其他供应商上的格式差异；`reasoning_effort`、`response_format` 在真实供应商上的行为；多 key 池的真实失败切换。
 - **P3-4 的 G1–G4**（2026-11-17）：P3-4b 加入 HTTP 入口后，**运行中**（先断言 8019 有监听、`/healthz` 通）与**摘除后**（先断言 8019 无监听、无进程，否则中止）各跑一次 PrintLab 全套：446 通过 / 42 跳过 / 7 失败（基线，同样 7 个符号链接用例）、`verify_onboarding` ok、`doctor` 四工具可用且 `missing_context` 为空、`git status` 空、无 `%SystemDrive%` 垃圾目录。聊天台与浏览器冒烟加入之后的最终提交前还要再测一次，见下方"提交前复核"。
 - P2-a 的 G1–G4（2026-11-17）：sidecar 运行中跑 PrintLab 全套（446/42/7、`verify_onboarding` ok、PrintLab `git status` 空），随后真正停掉（同一条命令里先断言 8019 无监听、无进程，否则中止），再测一遍结果相同。
@@ -201,10 +202,10 @@ E:\MyProjet\PrintLabInterface\
 │   ├─ tools\                        registry.py（固定 argv 模板，模型只填值）gateway.py（四层检查，结果包成 data 并截断）
 │   ├─ agents\                       definition.py（frontmatter→能力天花板，非法即零工具）loop.py（轮数/工具数/时限/取消/重复失败）
 │   ├─ web\                          chat.html app.css app.js（聊天台，三个固定文件，`__init__.py` 里是严格响应头）
-│   └─ workflows\                    仍是空包（P4 起填充）
+│   └─ workflows\                    definition.py（YAML 校验）engine.py（LangGraph 引擎）api.py（HTTP）
 ├─ config\agents\                   sarah.md  mike.md  project.md（3 个角色，全部只读工具，提示词写明"不得声称已打印/批准/发送、工具结果是数据"）
-├─ config\workflows\                空
-├─ tests\                           pytest 共 379 个（policy/runner/app/providers_core/gateway_api/fsprivate/tools/agent_definitions/agent_loop/sessions/chat_api/web）；另有 `browser_smoke.py`（真浏览器冒烟，不在默认 pytest 里，需 `playwright` 与本机 Edge，运行：`.venv/Scripts/python.exe tests/browser_smoke.py`）
+├─ config\workflows\                object-intake.yaml（需求 → 证据 → 人工确认 → 交接；全程只读，不建模、不切片、不批准、不发送）
+├─ tests\                           pytest 共 501 个（policy/runner/app/providers_core/gateway_api/fsprivate/tools/agent_definitions/agent_loop/sessions/chat_api/web/workflow_definition/workflow_engine/workflow_api）；另有 `browser_smoke.py`（真浏览器冒烟 35 项，不在默认 pytest 里，需 `playwright` 与本机 Edge，运行：`.venv/Scripts/python.exe tests/browser_smoke.py`）
 └─ data\                            interface.db、admin_token、run\（运行时产生，已 gitignore）
 ```
 
@@ -286,7 +287,8 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 | P3-3 | 已完成 | Agent 循环：最大轮数、每轮/总工具数、总时限 180 秒、可取消、相同失败调用两次即停 | 30 个测试，关键防线均做过变异检查；端到端用 sarah 角色 + 脚本化假模型 + 真实 PrintLab 读工具 |
 | P3-4 | 已完成 | 会话存储（`agents/sessions.py`，只存正文与元数据，不存工具原始结果）、`agents/manager.py`（单会话单运行、全局 3 个并发、事件队列有界、重启后把遗留 running 标成 interrupted）、`agents/api.py`（`/api/agents`、`/api/sessions`、`POST /api/sessions/{id}/run` 的 SSE、`/api/runs/{id}/cancel`）、`web/`（`/chat` 单页：无构建链，CSP `default-src 'none'`，无内联脚本，令牌只在内存，`textContent` 渲染） | 379 个测试；管理器与页面防线做过变异检查；真浏览器（Edge+Playwright）冒烟 24/24，连跑 3 次；G1–G4 两种状态通过 |
 | P3-5 | 未开始 | 只读搜索工具（超时、截断、不递归、强制来源） | 有单测；不把搜索结果当指令 |
-| P4 | 中 | 工作流与协同：显式状态机（需求到复盘）、"待人选择"与"待批准"硬停点、SQLite 邮箱、只读巡检角色、定时触发 | 一次完整小物件流程跑到"待批准"为止；中途杀进程可恢复；重放不重复建项目；G1–G4 + 无越权文件改动 |
+| P4-a | 已完成 | 工作流引擎：`workflows/definition.py`（YAML，四种阶段 agent/evidence/human/handoff；证据命令必须是 `check_cli` 判定为只读的；模板只允许 `{project}`/`{brief}`/`{out:id}`，不用 `str.format`；整个文件任何问题即整体拒绝）、`workflows/engine.py`（LangGraph + 独立 SQLite 检查点 `data/workflow_checkpoints.db` + `workflow_runs` 表；start 以 request_id 幂等；answer 只收 yes/no 且只在 waiting；blocked/interrupted 可 retry；重启把 running 标为 interrupted）、`workflows/api.py`（`/api/workflows`、`/api/workflow-runs` 及 answer/retry/stop，全部需 admin token）、聊天台"工作流"面板、内置 `config/workflows/object-intake.yaml` | 501 个测试；引擎与 API 的关键防线逐一变异检查；浏览器冒烟 35 项；G1–G3 运行中与摘除后均通过 |
+| P4-b | **未做** | 原计划里的这几项**没有做**：SQLite 邮箱（Agent 间通信）、只读巡检角色、定时/事件触发、"一次完整小物件流程跑到待批准"。其中定时/事件触发需要无人值守调用模型（用户已表示 API 条款自行负责）。 | 需要用户先同意怎么做；见 §11 |
 | P5 | 低 | 管理后台页面；可选反向代理（`/` 与 `/ai/`）；备份与导出 | 后台可管理供应商、角色、工作流；代理开关不影响旧入口；G1–G4 |
 | P6 | 低 | 稳定化：许可扫描、依赖锁定、文档、可选 Windows 服务化 | 全新机器按文档可安装；许可清单完整 |
 
@@ -336,6 +338,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P2-a 完成。新增 secrets（DPAPI）、security（admin token、Host 校验）、fsprivate（ACL 收窄）、providers/{_litellm,model_ref,model_card,key_pool,store,gateway,api}；167 个测试通过；G1–G4 通过。P2-b 阻塞于用户录入 key。
 - 2026-11-17：P3-1..3 完成（工具网关、角色定义、Agent 循环）；测试 303 个；修复 `$` 换行漏洞与 argv 内嵌标志漏洞。P3-4/P3-5 未做。摘除状态下 G1–G3 通过。
 - 2026-11-17：P3-4 完成（会话存储、SSE 聊天 API、`/chat` 页面、真浏览器冒烟）；用用户提供的 mimo key 做了 3 次真实调用；测试 379 个；修复 2 个冒烟发现的缺陷与 key 回显泄露风险。
+- 2026-11-17：P4-a 完成（LangGraph Spike；工作流定义/引擎/HTTP 入口；聊天台工作流面板；`CallResult.truncated` 与 Agent 状态 `truncated`）；501 测试 + 浏览器冒烟 35 项；G1–G3 运行中/摘除后通过。P4-b 未做。
 
 ## 10. 踩过的坑（后续务必先读）
 1. **子进程环境白名单太窄**：`printlab status` 退出码 0 但输出为空，并在 cwd 下造出名为 `%SystemDrive%` 的目录。白名单必须含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等，子进程 cwd 用 `data/run`，每次调用前后比对 PrintLab 的 `git status`。
@@ -363,6 +366,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 21. **mimo 的 key 形状是 `tp-...`**，原脱敏正则不认。供应商报错可能回显它拒绝的 key；现在网关先按 key 原文（含大小写、URL 编码形式）精确擦除，再跑通用脱敏，各有测试，并经变异检查。
 22. **`Settings.extra_hosts` 默认为空**；测试夹具才加 `testserver`。曾把 `testserver` 硬编码进生产的 Host 白名单，已移除并有回归测试。
 
+23. **LangGraph：节点抛异常时，检查点停在该节点之前**；`invoke(None)` 会只重跑这个节点。我最初用"返回 `stop` 标志"表示阻塞，结果 retry 直接跳过了失败的阶段（节点已"成功返回"）。现在失败阶段抛 `StageBlocked`。实测结论写在 `workflows/engine.py` 的 `_fail`。
+24. **LangGraph 不拒绝对未知线程的 resume**（不报错、什么都不做）。所以引擎每个公开方法都先查自己的 `workflow_runs` 表。
+25. **含 `interrupt()` 的节点在恢复时会从头重跑**：该节点里不得调用模型或有任何副作用。引擎里的人工节点只做 `interrupt`，并有测试守着"已完成阶段不重跑"。
+26. **变异检查发现一处"看起来是防线、其实冗余"的检查**（引擎里再调一次 `check_cli`，去掉后测试仍全绿）。真正的防线在 `PrintLabRunner.run`，对它做变异后引擎测试和 runner/policy 测试都变红。冗余检查已删，改成注释说明。教训：变异不红，要先判断是漏测还是冗余，不要只是补一个测试。
+27. **`classify()` 不看 `--execute` 之类的标志，`check_cli()` 才看**。凡是要判断"这条命令能不能跑"的地方都必须用 `check_cli`（工作流加载器曾误用 `classify`，被测试抓到）。
+28. **YAML 流式映射里 `question: Proceed?` 会解析失败**（`?` 在流式上下文里有含义），含标点的文本要加引号。
+29. **用 Python 往文件里写含 `\n` 的字面量会写成真实换行**，把字符串字面量写坏。需要带转义的内容时，用带引号分隔符的 heredoc 写到文件，再用脚本读取合并。
+30. **PrintLab 的 `Runtime/history/latest.json` 会自己变**：PrintLab 工作台在后台刷新它（sidecar 停止后空闲 8 秒它仍变化）。它在 PrintLab 的 `.gitignore` 里，不影响 `git status`。验收时不要把它当成 sidecar 的副作用。
+31. **Windows 上 `kill` 杀不掉 uvicorn**（再次确认）：每次 G4 前都在同一条命令里断言 8019 无监听、无进程，否则中止。
+
 ## 11. 已知缺口（尚未做，不要当成已完成）
 - 没有真实供应商调用；没有流式输出；没有取消；没有工具调用循环（P3）。
 - 写类 PrintLab 命令（handoff、new、build 等）只有单测，没有对真实 PrintLab 实跑。
@@ -381,3 +394,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 同一页面里令牌用输入框传入，**没有登录/会话机制**；任何拿到 `data/admin_token` 的本机进程都能调 API（文件已收紧到当前用户 + SYSTEM）。
 - 只有 mimo 一家做过真实验证；其他供应商的真实行为未知。
 - P4 工作流、P5 管理后台、P6 许可扫描与依赖锁定都没开始；`litellm`、`langgraph`、`playwright` 没有锁定文件。
+- **P4-b 没做**：Agent 间 SQLite 邮箱、只读巡检角色、定时/事件触发、"完整小物件流程跑到待批准"。当前工作流只有一个内置的 `object-intake`，它的终点是"交接给人"，不涉及建模、切片、批准、发送。
+- **工作流端到端（含人工点 yes 之后）没有用真模型+真项目跑过**，原因见 §0；假模型下的 30+28 个测试和浏览器冒烟覆盖了这条路径。
+- **工作流的检查点没有清理机制**：`data/workflow_checkpoints.db` 会一直增长；同一线程被两个进程同时恢复的情形没有测。
+- **`answer`/`retry` 的并发保护只在单进程内**（内存里的 `_busy` 集合）。多个 sidecar 进程指向同一个库时不安全；目前设计是单进程。
+- **工作流的 agent 阶段每次都新开一个 agent 运行**（`session=wf-<run id>` 只用于密钥粘性），不写入聊天会话，也不进聊天台的会话列表。
+- **取消正在进行的工作流阶段没有实现**：`stop` 在步骤进行中会返回 409，只能等当前步骤结束。

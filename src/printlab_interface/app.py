@@ -18,6 +18,9 @@ from .config import Settings, load_settings
 from .providers import api as providers_api
 from .providers.gateway import Gateway
 from .tools.gateway import ToolGateway
+from .workflows import api as workflows_api
+from .workflows.definition import load_dir as load_workflows
+from .workflows.engine import WorkflowEngine
 
 log = logging.getLogger("printlab_interface")
 
@@ -38,10 +41,17 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
         app.state.gateway = gateway or Gateway(settings.db_path)
         app.state.agents = load_dir(settings.agents_dir)
         tool_gateway = ToolGateway(app.state.adapter.runner, audit_db=lambda: db.connect(settings.db_path))
-        app.state.runs = RunManager(settings.db_path, AgentRunner(app.state.gateway, tool_gateway))
+        agent_runner = AgentRunner(app.state.gateway, tool_gateway)
+        app.state.runs = RunManager(settings.db_path, agent_runner)
         interrupted = app.state.runs.recover()
         if interrupted:
             log.warning("marked %d unfinished run(s) from a previous process as interrupted", interrupted)
+        app.state.workflows_engine = WorkflowEngine(
+            settings.db_path, settings.data_dir / "workflow_checkpoints.db", app.state.agents, agent_runner,
+            app.state.adapter.runner, load_workflows(settings.workflows_dir, app.state.agents))
+        stopped = app.state.workflows_engine.recover()
+        if stopped:
+            log.warning("marked %d workflow run(s) from a previous process as interrupted", stopped)
         log.info("admin token stored at %s (not logged)", settings.data_dir / security.TOKEN_FILE)
         try:
             yield
@@ -80,5 +90,6 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
 
     app.include_router(providers_api.router)
     app.include_router(agents_api.router)
+    app.include_router(workflows_api.router)
     app.include_router(web.router)
     return app

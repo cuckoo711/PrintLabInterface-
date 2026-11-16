@@ -52,6 +52,11 @@ class CallResult:
     warnings: list[str] = field(default_factory=list)
     tool_calls: list[dict] = field(default_factory=list)  # [{"id", "name", "arguments"}]
 
+    @property
+    def truncated(self) -> bool:
+        """True when the provider stopped because of the output limit; the text may end mid-sentence."""
+        return (self.finish_reason or "").lower() in {"length", "max_tokens", "max_output_tokens"}
+
 
 def _scrub(text: str, secrets_: list[str]) -> str:
     """Remove every occurrence of each known secret, including common transformed forms."""

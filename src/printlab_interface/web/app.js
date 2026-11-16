@@ -181,6 +181,7 @@ $("gate-form").addEventListener("submit", async (event) => {
   $("app").hidden = false;
   $("conn").textContent = "已连接";
   $("conn").classList.add("ok");
+  loadWorkflows().then(loadRuns).catch((error) => setState("工作流列表加载失败：" + error.message, true));
 });
 
 $("composer").addEventListener("submit", (event) => {
@@ -195,3 +196,132 @@ $("message").addEventListener("keydown", (event) => {
 });
 $("new-session").addEventListener("click", () => newSession().catch((e) => setState(e.message, true)));
 $("cancel").addEventListener("click", cancel);
+
+// ---- workflows ---------------------------------------------------------
+let currentWorkflowRun = null;
+let workflowBusy = false;
+
+const STATUS_LABEL = {
+  running: "运行中", waiting: "等你回答", blocked: "被阻塞", failed: "出错", finished: "已完成", stopped: "已停止", interrupted: "被中断",
+};
+
+function showChat(show) {
+  $("chat").hidden = !show;
+  $("wf-panel").hidden = show;
+}
+
+function requestId() {
+  // 8-80 chars of [A-Za-z0-9_.:-]; a fresh one per click so a double click is the only way to replay it.
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return "web-" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function loadWorkflows() {
+  const select = $("wf-name");
+  select.replaceChildren();
+  for (const wf of await json("/api/workflows")) {
+    const option = document.createElement("option");
+    option.value = wf.name;
+    option.textContent = wf.valid ? wf.name : `${wf.name} (无效)`;
+    option.disabled = !wf.valid;
+    select.appendChild(option);
+  }
+}
+
+async function loadRuns() {
+  const list = $("wf-runs");
+  list.replaceChildren();
+  for (const run of await json("/api/workflow-runs?limit=30")) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = `${run.workflow} · ${run.project || "-"} · ${STATUS_LABEL[run.status] || run.status}`;
+    if (run.id === currentWorkflowRun) button.setAttribute("aria-current", "true");
+    button.addEventListener("click", () => openRun(run.id));
+    item.appendChild(button);
+    list.appendChild(item);
+  }
+}
+
+function renderRun(run) {
+  currentWorkflowRun = run.id;
+  showChat(false);
+  const status = $("wf-status");
+  status.replaceChildren();
+  const badge = document.createElement("span");
+  badge.className = "badge " + run.status;
+  badge.textContent = STATUS_LABEL[run.status] || run.status;
+  status.append(`${run.workflow} · ${run.project || "-"} · 阶段 ${run.stage} `, badge);
+  $("wf-detail").textContent = run.detail || "";
+  $("wf-detail").className = run.status === "blocked" || run.status === "failed" ? "error" : "";
+
+  const asking = run.status === "waiting" && run.waiting_for;
+  $("wf-ask").hidden = !asking;
+  const shown = $("wf-shown");
+  shown.replaceChildren();
+  if (asking) {
+    $("wf-question").textContent = run.waiting_for.question;
+    for (const [key, value] of Object.entries(run.waiting_for.show || {})) shown.appendChild(outputBlock(key, value));
+  }
+  $("wf-retry").hidden = !(run.status === "blocked" || run.status === "interrupted");
+  $("wf-stop").hidden = ["finished", "stopped"].includes(run.status);
+
+  const outputs = $("wf-outputs");
+  outputs.replaceChildren();
+  for (const [key, value] of Object.entries(run.outputs || {})) outputs.appendChild(outputBlock(key, value));
+}
+
+function outputBlock(label, text) {
+  const box = document.createElement("div");
+  box.className = "wf-out";
+  const title = document.createElement("strong");
+  title.textContent = label;
+  const body = document.createElement("pre");
+  body.textContent = text; // untrusted: model text
+  box.append(title, body);
+  return box;
+}
+
+async function openRun(id) {
+  renderRun(await json("/api/workflow-runs/" + encodeURIComponent(id)));
+  await loadRuns();
+}
+
+async function workflowAction(fn) {
+  if (workflowBusy) return;
+  workflowBusy = true;
+  for (const id of ["wf-start", "wf-yes", "wf-no", "wf-retry", "wf-stop"]) $(id).disabled = true;
+  try {
+    await fn();
+  } catch (error) {
+    $("wf-detail").textContent = "出错：" + error.message;
+    $("wf-detail").className = "error";
+    $("wf-panel").hidden = false;
+    $("chat").hidden = true;
+  } finally {
+    workflowBusy = false;
+    for (const id of ["wf-start", "wf-yes", "wf-no", "wf-retry", "wf-stop"]) $(id).disabled = false;
+    loadRuns().catch(() => {});
+  }
+}
+
+$("wf-start").addEventListener("click", () => workflowAction(async () => {
+  const body = { workflow: $("wf-name").value, request_id: requestId(), project: $("wf-project").value.trim(), brief: $("wf-brief").value };
+  const model = $("model").value.trim();
+  if (model) body.model = model;
+  renderRun(await json("/api/workflow-runs", { method: "POST", body: JSON.stringify(body) }));
+}));
+for (const [id, answer] of [["wf-yes", "yes"], ["wf-no", "no"]]) {
+  $(id).addEventListener("click", () => workflowAction(async () => {
+    renderRun(await json(`/api/workflow-runs/${encodeURIComponent(currentWorkflowRun)}/answer`, { method: "POST", body: JSON.stringify({ answer }) }));
+  }));
+}
+$("wf-retry").addEventListener("click", () => workflowAction(async () => {
+  renderRun(await json(`/api/workflow-runs/${encodeURIComponent(currentWorkflowRun)}/retry`, { method: "POST" }));
+}));
+$("wf-stop").addEventListener("click", () => workflowAction(async () => {
+  renderRun(await json(`/api/workflow-runs/${encodeURIComponent(currentWorkflowRun)}/stop`, { method: "POST" }));
+}));
+$("wf-close").addEventListener("click", () => { showChat(true); currentWorkflowRun = null; });
+

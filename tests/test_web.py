@@ -106,3 +106,33 @@ def test_cancel_button_is_only_enabled_after_the_server_has_named_the_run():
 
 def test_page_declares_an_icon_so_browsers_do_not_request_a_missing_favicon():
     assert 'rel="icon"' in HTML
+
+
+def test_workflow_panel_has_labelled_controls_and_live_status():
+    for control in ("wf-name", "wf-project", "wf-brief"):
+        assert f'for="{control}"' in HTML, f"no <label for={control}>"
+    assert 'id="wf-status"' in HTML and 'role="status"' in HTML and 'aria-labelledby="wf-title"' in HTML
+    for button in ("wf-start", "wf-yes", "wf-no", "wf-retry", "wf-stop", "wf-close"):
+        assert f'id="{button}"' in HTML
+
+
+def test_workflow_script_renders_model_text_only_as_text_and_has_no_polling_hack():
+    code = re.sub(r"//[^\n]*", "", JS)
+    block = code[code.index("let currentWorkflowRun"):]
+    assert "textContent" in block and "innerHTML" not in block
+    assert "setInterval" not in code and "originalReveal" not in code
+    assert "crypto.getRandomValues" in block, "request ids must be unpredictable, not Math.random"
+    assert "Math.random" not in code
+
+
+def test_workflow_answers_are_exactly_yes_or_no_in_the_script():
+    code = re.sub(r"//[^\n]*", "", JS)
+    assert '["wf-yes", "yes"]' in code and '["wf-no", "no"]' in code
+    assert not re.search(r"answer\s*[:=]\s*\$\(", code), "the answer must never be read from free text"
+
+
+def test_workflow_lists_load_only_after_the_token_gate_is_passed():
+    code = re.sub(r"//[^\n]*", "", JS)
+    gate = code[code.index('$("gate-form").addEventListener'):]
+    ok_at = gate.index('$("conn").classList.add("ok")')
+    assert "loadWorkflows()" in gate[ok_at:ok_at + 200]

@@ -42,6 +42,7 @@ class Settings:
     extra_hosts: frozenset[str] = frozenset()
 
     agents_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "agents")
+    workflows_dir: Path = field(default_factory=lambda: REPO_ROOT / "config" / "workflows")
 
     @property
     def run_dir(self) -> Path:

@@ -156,4 +156,4 @@ def chat(body: ChatIn, request: Request):
         code = 502 if exc.status and exc.status >= 500 else (exc.status if exc.status in {401, 402, 403, 429} else 400)
         raise HTTPException(status_code=code, detail=str(exc)) from None
     return {"text": result.text, "model": result.model, "usage": result.usage, "attempts": result.attempts,
-            "finish_reason": result.finish_reason, "cost_usd": result.cost_usd, "warnings": result.warnings}
+            "finish_reason": result.finish_reason, "truncated": result.truncated, "cost_usd": result.cost_usd, "warnings": result.warnings}

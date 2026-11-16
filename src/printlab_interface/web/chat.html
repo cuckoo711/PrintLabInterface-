@@ -32,7 +32,36 @@
     <button id="new-session" type="button">新会话</button>
     <h2>会话</h2>
     <ul id="sessions"></ul>
+    <h2>工作流</h2>
+    <label for="wf-name">工作流</label>
+    <select id="wf-name"></select>
+    <label for="wf-project">项目 ID（例如 P001）</label>
+    <input id="wf-project" type="text" maxlength="64" autocomplete="off" spellcheck="false">
+    <label for="wf-brief">说明</label>
+    <textarea id="wf-brief" rows="3" maxlength="4000" autocomplete="off"></textarea>
+    <button id="wf-start" type="button">开始工作流</button>
+    <ul id="wf-runs"></ul>
   </aside>
+  <section id="wf-panel" hidden aria-labelledby="wf-title">
+    <h2 id="wf-title">工作流运行</h2>
+    <p id="wf-status" role="status"></p>
+    <p id="wf-detail"></p>
+    <section id="wf-ask" hidden>
+      <p id="wf-question"></p>
+      <div id="wf-shown"></div>
+      <div class="row">
+        <button id="wf-yes" type="button">是，继续</button>
+        <button id="wf-no" type="button">否，停止</button>
+      </div>
+    </section>
+    <div class="row">
+      <button id="wf-retry" type="button" hidden>重试这一步</button>
+      <button id="wf-stop" type="button" hidden>停止</button>
+      <button id="wf-close" type="button">回到聊天</button>
+    </div>
+    <h3>各阶段输出</h3>
+    <div id="wf-outputs"></div>
+  </section>
   <section id="chat">
     <div id="log" role="log" aria-live="polite"></div>
     <form id="composer" autocomplete="off">

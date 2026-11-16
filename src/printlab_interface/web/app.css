@@ -29,3 +29,18 @@ aside { padding: 12px 16px; border-right: 1px solid var(--line); overflow: auto;
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 [hidden] { display: none !important; }
 @media (max-width: 720px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } }
+
+/* workflow panel */
+h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
+#wf-panel { padding: 12px 16px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+#wf-runs { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#wf-runs button { width: 100%; text-align: left; background: transparent; color: var(--fg); border-color: var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#wf-runs button[aria-current="true"] { border-color: var(--accent); }
+#wf-ask { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.wf-out { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+.wf-out strong { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.wf-out pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); }
+.badge.waiting { border-color: var(--accent); color: var(--accent); } .badge.blocked, .badge.failed { border-color: var(--err); color: var(--err); }
+.badge.finished { border-color: #1b7f3b; color: #1b7f3b; }
+@media (max-width: 720px) { #wf-panel { padding: 12px 8px; } }

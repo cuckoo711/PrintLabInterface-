@@ -292,3 +292,30 @@ def test_cancel_during_a_model_call_that_asks_for_tools_runs_none_of_them(world)
     world.replies.append(reply(None, [tool_call("c1", "printlab_status")]))
     r = world.runner.run(agent(), "hi", cancel=c)
     assert r.status == "cancelled" and world.cli_calls == []
+
+
+def reply_with_finish(text, finish):
+    r = reply(text)
+    r.choices[0].finish_reason = finish
+    return r
+
+
+@pytest.mark.parametrize("finish", ["length", "LENGTH", "max_tokens"])
+def test_a_reply_cut_off_by_the_output_limit_is_not_reported_as_done(world, finish):
+    world.replies.append(reply_with_finish("the hook is 40 mm wide and", finish))
+    r = world.runner.run(agent(), "plan it")
+    assert r.status == "truncated" and "output limit" in r.error
+    assert r.text == "the hook is 40 mm wide and"  # what arrived is kept, not discarded
+    assert r.turns == 1
+
+
+def test_a_normal_stop_and_a_tool_call_finish_are_not_truncation(world):
+    for finish in ("stop", "tool_calls", None, "content_filter"):
+        world.replies.append(reply_with_finish("ok", finish))
+        assert world.runner.run(agent(), "x").status == "done", finish
+
+
+def test_truncation_event_is_streamed_so_the_user_sees_the_warning(world):
+    world.replies.append(reply_with_finish("half a sen", "length"))
+    texts = [e.data["text"] for e in world.runner.stream(agent(), "x") if e.kind == "text"]
+    assert texts[0] == "half a sen" and "cut off" in texts[-1]

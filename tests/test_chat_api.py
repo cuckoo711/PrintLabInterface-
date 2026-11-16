@@ -295,3 +295,15 @@ def test_session_listing_filters_by_agent_and_deleting_removes_everything(chat):
     assert chat.client.delete(f"/api/sessions/{a}").status_code == 204
     assert chat.client.get(f"/api/sessions/{a}").status_code == 404
     assert [s["id"] for s in chat.client.get("/api/sessions").json()] == [b]
+
+
+def test_a_truncated_reply_keeps_its_partial_text_and_the_run_is_recorded_as_truncated(chat):
+    sid = new_session(chat)
+    cut = reply("the hook is 40 mm wide and")
+    cut.choices[0].finish_reason = "length"
+    chat.replies.append(cut)
+    events = parse_sse(chat.client.post(f"/api/sessions/{sid}/run", json={"message": "plan"}).text)
+    assert events[-1][0] == "end" and events[-1][1]["status"] == "truncated" and "output limit" in events[-1][1]["error"]
+    conv = chat.client.get(f"/api/sessions/{sid}").json()
+    assert [(m["role"], m["content"]) for m in conv["messages"]] == [("user", "plan"), ("assistant", "the hook is 40 mm wide and")]
+    assert conv["runs"][0]["status"] == "truncated"

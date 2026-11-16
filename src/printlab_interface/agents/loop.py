@@ -36,7 +36,7 @@ class Event:
 
 @dataclass
 class RunResult:
-    status: str  # "done" | "max_turns" | "timeout" | "cancelled" | "error"
+    status: str  # "done" | "truncated" | "max_turns" | "timeout" | "cancelled" | "error"
     text: str
     turns: int
     tool_calls: int
@@ -120,6 +120,10 @@ class AgentRunner:
                 emit(Event("text", {"text": result.text}))
             if not calls:
                 messages.append({"role": "assistant", "content": result.text})
+                if result.truncated:
+                    # The provider hit its output limit; what we have may end mid-sentence. Say so instead of calling it done.
+                    emit(Event("text", {"text": "[the reply was cut off by the output limit]"}))
+                    return finish("truncated", "the model's reply hit the output limit and may be incomplete", turn)
                 return finish("done", turns=turn)
 
             if len(calls) > MAX_TOOL_CALLS_PER_TURN:

@@ -318,3 +318,21 @@ def test_tp_style_keys_are_redacted_by_shape_as_a_second_line_of_defence():
     from printlab_interface import redact
     assert "FAKEFAKEFAKE" not in redact.redact("key tp-FAKEFAKEFAKE0123456789abcdef failed")
     assert redact.redact("a tp-short is not a key") == "a tp-short is not a key"
+
+
+@pytest.mark.parametrize("finish,expected", [("length", True), ("LENGTH", True), ("max_tokens", True), ("stop", False), (None, False), ("tool_calls", False)])
+def test_call_result_reports_truncation_from_the_finish_reason(gw_env, finish, expected):
+    resp = ok_response("partial")
+    resp.choices[0].finish_reason = finish
+    gw_env.behaviour["queue"] = [resp]
+    result = gw_env.gw.complete("oa:gpt-4o-mini", MSG)
+    assert result.truncated is expected
+
+
+def test_chat_endpoint_exposes_the_truncated_flag(client):
+    client.post("/api/providers", json={"prefix": "oa", "name": "OpenAI", "kind": "openai"})
+    client.post("/api/providers/oa/keys", json={"api_key": SECRET_A})
+    cut = ok_response("half"); cut.choices[0].finish_reason = "length"
+    client.app_state.gateway = Gateway(client.app_state.settings.db_path, pool=KeyPool(), call=lambda **kw: cut)
+    body = client.post("/api/chat", json={"model": "oa:gpt-4o-mini", "messages": MSG}).json()
+    assert body["truncated"] is True and body["finish_reason"] == "length"
