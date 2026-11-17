@@ -12,6 +12,7 @@ from . import __version__, backup, db, redact, security, web
 from .adapters.printlab import PrintLabAdapter
 from .agents import api as agents_api
 from . import auth_api
+from . import projects_api
 from .automation import api as automation_api
 from .automation.scheduler import Scheduler
 from .agents.definition import load_dir
@@ -108,6 +109,7 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
         return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="printlab-interface-config.json"', "Cache-Control": "no-store"})
 
     app.include_router(auth_api.router)
+    app.include_router(projects_api.router)
     app.include_router(providers_api.router)
     app.include_router(agents_api.router)
     app.include_router(workflows_api.router)

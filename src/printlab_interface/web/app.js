@@ -35,20 +35,49 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     let detail = response.statusText;
+    let existing;
     try {
       const body = await response.json();
-      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      if (body.detail && typeof body.detail === "object" && typeof body.detail.message === "string") {
+        detail = body.detail.message;
+        existing = typeof body.detail.existing === "string" ? body.detail.existing : undefined;
+      } else {
+        detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+      }
     } catch (_) { /* keep statusText */ }
     const error = new Error(detail);
     error.status = response.status;
+    if (existing) error.existing = existing;
     throw error;
   }
   return response.status === 204 ? null : response;
 }
 
+// Asks the server to create the project the person just confirmed. The server checks everything again.
+async function createProject(fields) {
+  return (await api("/api/projects", { method: "POST", body: JSON.stringify(fields) })).json();
+}
+
 const json = async (path, options) => (await api(path, options)).json();
 
 function addMessage(kind, text) {
+  if (kind === "assistant" && text.includes("```printlab-project")) {
+    const parts = Proposal.split(text);
+    if (parts.some((part) => part.proposal)) {
+      let last = null;
+      for (const part of parts) {
+        if (part.proposal) {
+          const card = Proposal.card(part.proposal, createProject);
+          $("log").appendChild(card);
+          last = card;
+        } else if (part.text.trim()) {
+          last = addMessage("assistant", part.text.trim());
+        }
+      }
+      $("log").scrollTop = $("log").scrollHeight;
+      return last;
+    }
+  }
   const node = document.createElement("div");
   node.className = "msg " + kind;
   node.textContent = text; // never innerHTML: model and tool text are untrusted

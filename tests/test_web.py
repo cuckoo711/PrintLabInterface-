@@ -190,3 +190,36 @@ def test_the_draft_is_cleaned_before_it_is_used():
     assert r'.filter((c) => c === "\n" || c >= " ")' in takeover
     assert takeover.index(".filter(") < takeover.index(".slice(0, MAX_DRAFT)") < takeover.index(".trim()")
     assert "decodeURIComponent(" in takeover and "catch (_)" in takeover  # a malformed fragment is caught, not thrown
+
+
+PROPOSAL_JS = (WEB / "proposal.js").read_text(encoding="utf-8")
+
+
+def test_the_proposal_script_only_builds_text_and_has_one_fixed_destination():
+    code = re.sub(r"//[^\n]*", "", PROPOSAL_JS)
+    for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "localStorage", "sessionStorage",
+                   "document.cookie", "Math.random", "randomUUID", "fetch(", "XMLHttpRequest", "WebSocket"):
+        assert banned not in code, banned
+    # the only thing it can do on its own is call the function the page hands it; the address lives in app.js, fixed
+    assert 'createProject' in code and "/api/projects" not in code
+    assert "/api/projects" in JS and "createProject" in JS
+    # it only accepts these three fields; anything else in a block means it is not a proposal
+    assert '["name", "kind", "brief"]' in code
+
+
+def test_a_proposal_cannot_choose_where_the_request_goes_or_what_else_it_carries():
+    # the request body is built from the three checked fields plus an id and a flag: nothing from the reply decides more
+    call = [l for l in PROPOSAL_JS.splitlines() if "createProject({" in l]
+    assert call and all("proposal_id: id, name: p.name, kind: p.kind, brief: p.brief, allow_same_name:" in l for l in call)
+
+
+def test_the_proposal_script_is_served_with_the_same_strict_headers_and_is_listed_in_the_page():
+    assert '<script src="/chat/proposal.js"></script>' in HTML
+    assert HTML.index("/chat/login.js") < HTML.index("/chat/proposal.js") < HTML.index("/chat/app.js")
+
+
+def test_the_same_proposal_always_gets_the_same_id():
+    # ids come from the content, not from chance, so pressing twice or reloading cannot make two projects
+    assert "function idFor(p)" in PROPOSAL_JS
+    body = PROPOSAL_JS[PROPOSAL_JS.index("function idFor(p)"):PROPOSAL_JS.index("function el(")]
+    assert "JSON.stringify([p.name, p.kind, p.brief])" in body

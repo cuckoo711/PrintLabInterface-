@@ -60,10 +60,26 @@ def main() -> int:
     runner_mod.git_snapshot = lambda r: set()
     real_run = subprocess.run
 
-    class Proc:
-        stdout = json.dumps({"marker": TOOL_SECRET, "status": "recorded"}).encode(); stderr = b""; returncode = 0
+    made: list[dict] = []   # the projects the fake PrintLab has been asked to create
 
-    subprocess.run = lambda cmd, *a, **k: Proc() if any(str(p).endswith(("printlab.ps1", "printlab")) for p in cmd) else real_run(cmd, *a, **k)
+    class Proc:
+        def __init__(self, payload):
+            self.stdout = json.dumps(payload).encode(); self.stderr = b""; self.returncode = 0
+
+    def fake_cli(cmd, *a, **k):
+        if not any(str(p).endswith(("printlab.ps1", "printlab")) for p in cmd):
+            return real_run(cmd, *a, **k)
+        argv = [str(x) for x in cmd]
+        if "new" in argv:
+            tail = argv[argv.index("new"):]
+            row = {"id": f"P{len(made) + 1:03}", "name": tail[1], "kind": tail[tail.index("--kind") + 1]}
+            made.append(row)
+            return Proc(row)
+        if "status" in argv:
+            return Proc({"projects": list(made), "marker": TOOL_SECRET})
+        return Proc({"marker": TOOL_SECRET, "status": "recorded"})
+
+    subprocess.run = fake_cli
 
     port = free_port()
     agents = tmp / "agents"; agents.mkdir()
@@ -325,6 +341,37 @@ stages:
         check("chat: the admin link opens the admin page and leaves this page (and its token) alone",
               opened.value.url.endswith("/admin") and page.is_visible("#app") and page.is_visible("#chat"))
         opened.value.close()
+
+        # --- a project proposal in a reply becomes a card; one click creates the project ---
+        import json as _json
+        proposal = {"name": "洞洞板收纳盒 & 小米", "kind": "functional", "brief": "56x56x100 & 白色 PLA <i>x</i>"}
+        text = "需求清楚了。\n\n```printlab-project\n" + _json.dumps(proposal, ensure_ascii=False) + "\n```\n\n点一下就建。"
+        script_of_replies.clear()  # an earlier step may have left a reply unread; it would answer this message instead
+        script_of_replies.append(reply(text))
+        page.click("#new-session")  # a fresh conversation, so the earlier workflow and chat messages are out of the way
+        expect(page.locator("#log .msg")).to_have_count(0, timeout=5000)
+        page.fill("#message", "确认，建吧"); page.press("#message", "Control+Enter")
+        page.wait_for_selector(".proposal", timeout=10000)
+        card = page.locator(".proposal").first
+        check("proposal: the block becomes a card, not raw text", card.is_visible() and "printlab-project" not in page.inner_text("#log"))
+        check("proposal: its text is shown as text (markup in the brief stays inert)", "<i>x</i>" in card.inner_text() and card.locator("i").count() == 0 and "洞洞板收纳盒 & 小米" in card.inner_text())
+        check("proposal: the words around the block are still shown", "需求清楚了" in page.inner_text("#log") and "点一下就建" in page.inner_text("#log"))
+        check("proposal: nothing is created until the button is pressed", len(made) == 0)
+        card.get_by_role("button", name="建这个项目").click()
+        expect(card.locator(".done")).to_contain_text("P001", timeout=10000)
+        check("proposal: one click creates exactly one project", len(made) == 1 and made[0]["name"] == "洞洞板收纳盒 & 小米", str(made))
+        link = card.locator(".done a")
+        check("proposal: the finished card links to the project in PrintLab", "/#/projects/P001" in (link.get_attribute("href") or "") and link.get_attribute("target") == "_blank")
+        check("proposal: the button is gone after it is done, so it cannot be pressed twice", card.get_by_role("button", name="建这个项目").count() == 0)
+        # a block that is not a valid proposal stays as ordinary text and shows no button
+        script_of_replies.append(reply('```printlab-project\n{"name": "x", "approve": true}\n```\n\n```printlab-project\n{"name": "a<b>c", "kind": "functional"}\n```'))
+        before_count = page.locator(".msg.assistant").count()
+        page.fill("#message", "再来一个"); page.press("#message", "Control+Enter")
+        expect(page.locator(".msg.assistant")).to_have_count(before_count + 1, timeout=10000)  # this reply, not the previous "完成" status
+        expect(page.locator("#state")).to_contain_text("完成", timeout=10000)
+        shown = page.locator(".msg.assistant").last.inner_text()
+        check("proposal: a block with an unknown field, or a name with <> in it, is not turned into a card", page.locator(".proposal").count() == 1 and len(made) == 1)
+        check("proposal: such a block stays visible as plain text so the person can see what was said", "printlab-project" in shown and "approve" in shown)
 
         # --- hand-off of a draft from the PrintLab workbench ---
         draft_page = context.new_page()
