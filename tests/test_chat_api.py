@@ -307,3 +307,40 @@ def test_a_truncated_reply_keeps_its_partial_text_and_the_run_is_recorded_as_tru
     conv = chat.client.get(f"/api/sessions/{sid}").json()
     assert [(m["role"], m["content"]) for m in conv["messages"]] == [("user", "plan"), ("assistant", "the hook is 40 mm wide and")]
     assert conv["runs"][0]["status"] == "truncated"
+
+
+def test_a_long_conversation_is_read_in_pages_newest_first(chat):
+    sid = new_session(chat)
+    conn = db.connect(chat.settings.db_path); sessions.init(conn)
+    for i in range(45):
+        sessions.add_message(conn, sid, "user" if i % 2 == 0 else "assistant", f"m{i}")
+    conn.close()
+    first = chat.client.get(f"/api/sessions/{sid}").json()
+    assert [m["content"] for m in first["messages"]] == [f"m{i}" for i in range(5, 45)] and first["has_more"] is True
+    older = chat.client.get(f"/api/sessions/{sid}/messages", params={"before": first["messages"][0]["id"], "limit": 40}).json()
+    assert [m["content"] for m in older["messages"]] == [f"m{i}" for i in range(5)] and older["has_more"] is False
+
+
+def test_the_page_endpoint_checks_its_inputs_and_needs_sign_in(chat):
+    sid = new_session(chat)
+    assert chat.client.get("/api/sessions/nope/messages").status_code == 404
+    for bad in ({"before": 0}, {"before": "x"}, {"limit": 0}, {"limit": 101}):
+        assert chat.client.get(f"/api/sessions/{sid}/messages", params=bad).status_code == 422, bad
+    with TestClient(chat.app) as anonymous:
+        assert anonymous.get(f"/api/sessions/{sid}/messages").status_code in {401, 403}
+
+
+def test_streamed_pieces_reach_the_page_before_the_whole_reply_and_the_stored_text_is_the_whole_reply(chat):
+    sid = new_session(chat)
+
+    def chunk(text, finish=None):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text, tool_calls=None), finish_reason=finish)], usage=None)
+
+    chat.replies.append(iter([chunk("Hel"), chunk("lo"), chunk(" world", "stop"),
+                              SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=4, completion_tokens=3, total_tokens=7))]))
+    events = parse_sse(chat.client.post(f"/api/sessions/{sid}/run", json={"message": "hello"}).text)
+    kinds = [k for k, _ in events]
+    assert [d["text"] for k, d in events if k == "text_delta"] == ["Hel", "lo", " world"]
+    assert kinds.index("text_delta") < kinds.index("text") < kinds.index("end")
+    assert [d["text"] for k, d in events if k == "text"] == ["Hello world"]
+    assert [(m["role"], m["content"]) for m in chat.client.get(f"/api/sessions/{sid}").json()["messages"]][-1] == ("assistant", "Hello world")

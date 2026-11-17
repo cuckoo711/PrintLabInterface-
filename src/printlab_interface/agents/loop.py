@@ -30,7 +30,7 @@ MAX_HISTORY_MESSAGES = 60
 
 @dataclass
 class Event:
-    kind: str  # "text" | "tool_call" | "tool_result" | "status" | "usage"
+    kind: str  # "text_delta" | "text" | "tool_call" | "tool_result" | "status" | "usage"
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -106,7 +106,11 @@ class AgentRunner:
                 return finish("timeout", turns=turn - 1)
             remaining = max(1.0, min(60.0, MAX_RUN_SECONDS - (self._clock() - started)))
             try:
-                result = self.models.complete(model_value, messages, session=session, timeout_s=remaining, tools=tool_schemas or None)
+                # Each piece of the reply is passed on as it arrives ("text_delta"); the whole reply still follows as one "text"
+                # event, and that one is the truth. A cancel is polled between pieces, so it does not wait for the model.
+                result = self.models.complete(model_value, messages, session=session, timeout_s=remaining, tools=tool_schemas or None,
+                                              on_delta=lambda piece: emit(Event("text_delta", {"text": piece})),
+                                              should_stop=(lambda: cancel.is_set) if cancel is not None else None)
             except GatewayError as exc:
                 return finish("error", str(exc)[:300], turn - 1)
             for key in usage:
@@ -151,7 +155,7 @@ class AgentRunner:
         return finish("max_turns", turns=effective.max_turns)
 
     def stream(self, *args: Any, **kwargs: Any) -> Iterator[Event]:
-        """Run to completion and yield the events in order. Streaming of token deltas comes with real providers."""
+        """Run to completion and yield the events in order (the page reads them live through the run manager instead)."""
         events: list[Event] = []
         result = self.run(*args, on_event=events.append, **kwargs)
         yield from events

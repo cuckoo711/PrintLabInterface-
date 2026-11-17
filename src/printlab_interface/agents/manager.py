@@ -131,7 +131,9 @@ class RunManager:
         def on_event(event: Event) -> None:
             if event.kind == "tool_call":
                 tools_used.append(str(event.data.get("name")))
-            self._push(active, event)
+            # A piece of streamed text may be dropped when the reader is slow: the whole reply follows as a "text" event.
+            # Everything else is kept, at the cost of the oldest queued item.
+            self._push(active, event, must_keep=event.kind != "text_delta")
 
         result = RunResult("error", "", 0, 0, {}, "run did not start")
         try:

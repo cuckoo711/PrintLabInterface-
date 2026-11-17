@@ -10,6 +10,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from urllib.parse import quote
@@ -82,6 +83,64 @@ def _retry_after(exc: Exception) -> float | None:
 
 
 MAX_TOOL_ARGS_CHARS = 8_000
+MAX_STREAM_CHARS = 100_000
+
+
+def _collect_stream(stream: Any, on_delta: Callable[[str], None], should_stop: Callable[[], bool] | None, state: dict) -> Any:
+    """Read a streamed completion to the end and return it shaped like a non-streamed response.
+
+    `on_delta` sees each piece of text as it arrives. `state["output"]` turns True the moment the first piece of text has been
+    handed on, because from then on a failure must not be retried on another key (the person has already seen output).
+    A stop request ends the read early and closes the stream; the caller decides what a stopped reply means.
+    """
+    parts: list[str] = []
+    size = 0
+    calls: dict[int, dict] = {}
+    finish: str | None = None
+    usage = None
+    try:
+        for chunk in stream:
+            if should_stop is not None and should_stop():
+                break
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = chunk_usage
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue
+            choice = choices[0]
+            finish = getattr(choice, "finish_reason", None) or finish
+            delta = getattr(choice, "delta", None)
+            piece = getattr(delta, "content", None)
+            if isinstance(piece, str) and piece:
+                parts.append(piece)
+                size += len(piece)
+                state["output"] = True
+                on_delta(piece)
+                if size > MAX_STREAM_CHARS:
+                    finish = "length"
+                    break
+            for position, call in enumerate(getattr(delta, "tool_calls", None) or []):
+                index = getattr(call, "index", None)
+                slot = calls.setdefault(index if isinstance(index, int) else position, {"id": "", "name": "", "arguments": ""})
+                fn = getattr(call, "function", None)
+                if isinstance(getattr(call, "id", None), str) and call.id:
+                    slot["id"] = call.id
+                if isinstance(getattr(fn, "name", None), str):
+                    slot["name"] += fn.name
+                if isinstance(getattr(fn, "arguments", None), str):
+                    slot["arguments"] += fn.arguments
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 - a stream that cannot be closed is already finished
+                pass
+    tool_calls = [SimpleNamespace(id=c["id"], function=SimpleNamespace(name=c["name"], arguments=c["arguments"] or "{}"))
+                  for _, c in sorted(calls.items())]
+    message = SimpleNamespace(content="".join(parts), tool_calls=tool_calls or None)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason=finish)], usage=usage)
 
 
 def _tool_calls_of(message: Any) -> list[dict]:
@@ -156,7 +215,10 @@ class Gateway:
         self, model_value: str, messages: list[dict], *, session: str | None = None, max_tokens: int | None = None,
         temperature: float | None = None, reasoning_effort: str | None = None, timeout_s: float = 60.0,
         response_format: dict | None = None, mock_response: Any = None, tools: list[dict] | None = None,
+        on_delta: Callable[[str], None] | None = None, should_stop: Callable[[], bool] | None = None,
     ) -> CallResult:
+        """One model call. With `on_delta` the reply is streamed: each piece of text is handed to it as it arrives, and the
+        result is still the whole reply. `should_stop` is polled between pieces so a cancel does not wait for the model."""
         _validate_messages(messages)
         if tools is not None and (not isinstance(tools, list) or len(tools) > MAX_TOOLS):
             raise GatewayError(f"tools must be a list of at most {MAX_TOOLS} definitions")
@@ -203,9 +265,13 @@ class Gateway:
                         raise last_error or GatewayError(f"no usable API key for '{ref.prefix}'")
                     tried.add(entry.id)
                 started = time.perf_counter()
+                state = {"output": False}
                 try:
                     response = self._call_once(provider, ref.model, messages, entry, conn, out_cap, temperature,
-                                               reasoning_effort, timeout_s, response_format, mock_response, tools)
+                                               reasoning_effort, timeout_s, response_format, mock_response, tools,
+                                               stream=on_delta is not None)
+                    if on_delta is not None and not hasattr(response, "choices"):
+                        response = _collect_stream(response, on_delta, should_stop, state)
                 except Exception as exc:  # noqa: BLE001 - classified below
                     status = _status_of(exc)
                     fault: Fault = (self.pool.report_failure(ref.prefix, entry, status, str(exc), _retry_after(exc))
@@ -219,7 +285,7 @@ class Gateway:
                     safe = redact(_scrub(str(exc), self._secrets_in_use(conn, ref.prefix)))[:300]
                     last_error = GatewayError(f"{type(exc).__name__}: {safe}", status=status,
                                               retryable=fault.kind in {"rate_limited", "quota", "forbidden", "invalid"})
-                    if self.pool.should_try_next_key(fault, output_started=False) and attempt < MAX_ATTEMPTS:
+                    if self.pool.should_try_next_key(fault, output_started=state["output"]) and attempt < MAX_ATTEMPTS:
                         continue
                     raise last_error from None
                 if entry:
@@ -232,7 +298,7 @@ class Gateway:
         finally:
             conn.close()
 
-    def _call_once(self, provider, model, messages, entry, conn, out_cap, temperature, reasoning_effort, timeout_s, response_format, mock_response, tools=None):
+    def _call_once(self, provider, model, messages, entry, conn, out_cap, temperature, reasoning_effort, timeout_s, response_format, mock_response, tools=None, stream=False):
         kwargs: dict[str, Any] = {
             "model": f"{_LITELLM_PREFIX[provider.litellm_kind]}/{model}", "messages": messages,
             "timeout": timeout_s, "num_retries": 0,  # retries are the pool's job, so cost and key choice stay visible
@@ -251,6 +317,9 @@ class Gateway:
             kwargs["response_format"] = response_format
         if tools:
             kwargs["tools"] = tools
+        if stream:
+            kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}  # the last chunk then carries the token counts
         if mock_response is not None:
             kwargs["mock_response"] = mock_response
         return self._call(**kwargs)

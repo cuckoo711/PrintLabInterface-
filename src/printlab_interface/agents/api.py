@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -86,8 +86,21 @@ def get_session(session_id: str, request: Request):
     conn = _conn(request)
     try:
         s = _session_or_404(conn, session_id)
-        return {"id": s.id, "agent": s.agent, "title": s.title, "messages": sessions.messages(conn, session_id),
+        # Only the newest page: a long conversation is read in pages, older ones come from /messages?before=
+        page, more = sessions.messages_page(conn, session_id)
+        return {"id": s.id, "agent": s.agent, "title": s.title, "messages": page, "has_more": more,
                 "runs": sessions.list_runs(conn, session_id)}
+    finally:
+        conn.close()
+
+
+@router.get("/sessions/{session_id}/messages")
+def get_messages(session_id: str, request: Request, before: int | None = Query(default=None, ge=1), limit: int = Query(default=sessions.PAGE_DEFAULT, ge=1, le=sessions.PAGE_MAX)):
+    conn = _conn(request)
+    try:
+        _session_or_404(conn, session_id)
+        page, more = sessions.messages_page(conn, session_id, before, limit)
+        return {"messages": page, "has_more": more}
     finally:
         conn.close()
 

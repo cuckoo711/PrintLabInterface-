@@ -138,6 +138,25 @@ def messages(conn: sqlite3.Connection, session_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+PAGE_DEFAULT = 40
+PAGE_MAX = 100
+
+
+def messages_page(conn: sqlite3.Connection, session_id: str, before: int | None = None, limit: int = PAGE_DEFAULT) -> tuple[list[dict], bool]:
+    """One page of messages, oldest first: the `limit` messages just before id `before` (or the newest ones).
+    Also says whether anything older exists, so the page knows whether to keep offering to load more."""
+    get(conn, session_id)
+    limit = max(1, min(int(limit), PAGE_MAX))
+    if before is None:
+        rows = conn.execute("SELECT id, role, content, created_at FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
+                            (session_id, limit + 1)).fetchall()
+    else:
+        rows = conn.execute("SELECT id, role, content, created_at FROM messages WHERE session_id=? AND id<? ORDER BY id DESC LIMIT ?",
+                            (session_id, int(before), limit + 1)).fetchall()
+    more = len(rows) > limit
+    return [dict(r) for r in reversed(rows[:limit])], more
+
+
 def start_run(conn: sqlite3.Connection, session_id: str, model: str) -> str:
     get(conn, session_id)
     run_id = uuid.uuid4().hex[:16]
