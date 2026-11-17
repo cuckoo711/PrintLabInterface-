@@ -12,6 +12,7 @@ _FILES = {
     "": ("chat.html", "text/html; charset=utf-8"),
     "app.css": ("app.css", "text/css; charset=utf-8"),
     "app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "login.js": ("login.js", "text/javascript; charset=utf-8"),
     "admin": ("admin.html", "text/html; charset=utf-8"),
     "admin.js": ("admin.js", "text/javascript; charset=utf-8"),
 }
@@ -66,3 +67,8 @@ def admin_js() -> Response:
 @router.get("/admin/app.css", include_in_schema=False)
 def admin_css() -> Response:
     return _serve("app.css")
+
+
+@router.get("/chat/login.js", include_in_schema=False)
+def login_js() -> Response:
+    return _serve("login.js")

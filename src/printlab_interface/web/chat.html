@@ -15,15 +15,36 @@
     <a id="to-printlab" href="#" target="_blank" rel="noreferrer">PrintLab 工作台</a>
     <a href="/admin" target="_blank" rel="noreferrer">管理后台</a>
   </nav>
+  <button id="logout" type="button" class="quiet" hidden>退出登录</button>
 </header>
 
 <section id="gate">
-  <p>输入管理令牌后继续。令牌在 <code>data/admin_token</code> 里。它只保存在这个页面的内存中，刷新页面后需要重新输入。</p>
-  <form id="gate-form" autocomplete="off">
-    <label for="token">管理令牌</label>
-    <input id="token" type="password" autocomplete="off" spellcheck="false" required>
-    <button type="submit">连接</button>
-  </form>
+  <div id="setup" hidden>
+    <h2>第一次使用：设置口令</h2>
+    <p>口令只存在你这台电脑上，以加盐慢哈希保存，不会以明文保存。设置后这个浏览器会保持登录。</p>
+    <form id="setup-form" autocomplete="off">
+      <label for="setup-pass">口令（至少 10 个字符）</label>
+      <input id="setup-pass" type="password" autocomplete="new-password" spellcheck="false" minlength="10" maxlength="200">
+      <label for="setup-pass2">再输入一次</label>
+      <input id="setup-pass2" type="password" autocomplete="new-password" spellcheck="false" maxlength="200">
+      <button type="submit">设置并进入</button>
+    </form>
+    <p class="hint">留空两个框直接点按钮，会替你生成一个口令，只显示这一次，请自己保存好。</p>
+  </div>
+  <div id="generated" hidden>
+    <h2>请保存好这个口令</h2>
+    <p>它只会显示这一次，之后无法再找回；忘记了需要重置。</p>
+    <p><code id="generated-value" class="big"></code></p>
+    <button id="generated-ok" type="button">我已保存，进入</button>
+  </div>
+  <div id="login" hidden>
+    <h2>登录</h2>
+    <form id="login-form" autocomplete="off">
+      <label for="login-pass">口令</label>
+      <input id="login-pass" type="password" autocomplete="current-password" spellcheck="false" maxlength="200" required>
+      <button type="submit">登录</button>
+    </form>
+  </div>
   <p id="gate-error" class="error" role="alert" hidden></p>
 </section>
 
@@ -79,6 +100,7 @@
     </form>
   </section>
 </main>
+<script src="/chat/login.js"></script>
 <script src="/chat/app.js"></script>
 </body>
 </html>

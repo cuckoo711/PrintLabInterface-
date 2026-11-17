@@ -68,3 +68,10 @@ button.quiet { background: transparent; color: var(--fg); border-color: var(--li
 .badge.warn { border-color: #b26a00; color: #b26a00; } .badge.error { border-color: var(--err); color: var(--err); }
 table { border-collapse: collapse; width: 100%; font-size: 12px; } th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 4px 6px; overflow-wrap: anywhere; }
 @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .grid textarea { grid-column: 1; } }
+
+/* sign-in */
+#gate h2 { font-size: 16px; color: var(--fg); margin: 0 0 8px; }
+#gate form, #gate #generated { display: flex; flex-direction: column; gap: 6px; max-width: 460px; }
+.hint { color: var(--muted); font-size: 13px; }
+code.big { display: block; font-size: 20px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; user-select: all; overflow-wrap: anywhere; }
+#logout { margin-left: 8px; }

@@ -1,6 +1,5 @@
 "use strict";
-// The admin token lives only in this variable. It is never written to storage, cookies, the URL or the DOM.
-let token = "";
+// Signing in is handled by login.js: a passphrase the person set, and a browser session the page cannot read.
 let currentSession = null;
 let currentRun = null;
 let abortController = null;
@@ -30,9 +29,9 @@ $("to-printlab").href = `${location.protocol}//${location.hostname}:8018/`;
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
-    headers: { "x-admin-token": token, "content-type": "application/json", ...(options.headers || {}) },
+    headers: Login.headers(options.headers || {}),
     cache: "no-store",
-    credentials: "omit",
+    credentials: "same-origin",
   });
   if (!response.ok) {
     let detail = response.statusText;
@@ -182,25 +181,17 @@ async function cancel() {
   catch (error) { setState("取消失败：" + error.message, true); }
 }
 
-$("gate-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  token = $("token").value.trim();
-  $("token").value = "";
-  const gateError = $("gate-error");
-  gateError.hidden = true;
+Login.start(async () => {
   try {
     await loadAgents();
     await loadSessions();
   } catch (error) {
-    token = "";
-    gateError.textContent = error.status === 401 ? "令牌不对。" : "连接失败：" + error.message;
-    gateError.hidden = false;
+    setState("连接失败：" + error.message, true);
     return;
   }
-  $("gate").hidden = true;
   $("app").hidden = false;
-  $("conn").textContent = "已连接";
-  $("conn").classList.add("ok");
+  $("logout").hidden = false;
+  $("logout").addEventListener("click", () => Login.logout());
   loadWorkflows().then(loadRuns).catch((error) => setState("工作流列表加载失败：" + error.message, true));
   if (handedOverDraft) {
     const wanted = Array.from($("agent").options).find((o) => o.value === "project" && !o.disabled);

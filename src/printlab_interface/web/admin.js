@@ -1,7 +1,6 @@
 "use strict";
-// The admin token lives only in this variable. It is never written to storage, cookies, the URL or the DOM.
+// Signing in is handled by login.js: a passphrase the person set, and a browser session the page cannot read.
 // Every piece of text from the server is put on the page with textContent, never as markup.
-let token = "";
 
 const $ = (id) => document.getElementById(id);
 
@@ -25,9 +24,9 @@ function el(tag, props = {}, ...children) {
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
-    headers: { "x-admin-token": token, "content-type": "application/json", ...(options.headers || {}) },
+    headers: Login.headers(options.headers || {}),
     cache: "no-store",
-    credentials: "omit",
+    credentials: "same-origin",
   });
   if (!response.ok) {
     let detail = response.statusText;
@@ -279,22 +278,16 @@ for (const button of document.querySelectorAll("nav button")) {
   });
 }
 
-$("gate-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  token = $("token").value.trim();
-  $("token").value = "";
+Login.start(async () => {
   try {
-    await json("/api/scheduler"); // any admin route works as a token check
-    $("gate").hidden = true;
-    $("admin").hidden = false;
-    $("conn").textContent = "已连接";
-    $("conn").className = "pill ok";
-    $("gate-error").hidden = true;
-    syncScheduleForm();
-    await Promise.all([loadProviders(), loadRoles(), loadSchedules(), loadMail()]);
+    await json("/api/scheduler");
   } catch (error) {
-    token = "";
-    $("gate-error").textContent = error.status === 401 ? "令牌不对。" : "连接失败：" + error.message;
-    $("gate-error").hidden = false;
+    notice("连接失败：" + error.message, true);
+    return;
   }
+  $("admin").hidden = false;
+  $("logout").hidden = false;
+  $("logout").addEventListener("click", () => Login.logout());
+  syncScheduleForm();
+  await Promise.all([loadProviders(), loadRoles(), loadSchedules(), loadMail()]);
 });

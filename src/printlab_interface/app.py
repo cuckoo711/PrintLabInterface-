@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from . import __version__, backup, db, redact, security, web
 from .adapters.printlab import PrintLabAdapter
 from .agents import api as agents_api
+from . import auth_api
 from .automation import api as automation_api
 from .automation.scheduler import Scheduler
 from .agents.definition import load_dir
@@ -61,7 +62,7 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
                                         enabled=settings.scheduler_enabled, tick_s=settings.scheduler_tick_s)
         if app.state.scheduler.start():
             log.warning("scheduler is ON (PLI_SCHEDULER=1); schedules run only after they are enabled one by one")
-        log.info("admin token stored at %s (not logged)", settings.data_dir / security.TOKEN_FILE)
+        log.info("sign-in: open /chat or /admin; the first visit sets a passphrase (script token stays in %s, not logged)", settings.data_dir / security.TOKEN_FILE)
         try:
             yield
         finally:
@@ -106,6 +107,7 @@ def create_app(settings: Settings | None = None, adapter: PrintLabAdapter | None
             db.record_audit(conn, "admin", "export", "config", "ok", f"providers={len(data['providers'])} schedules={len(data['schedules'])}")
         return JSONResponse(data, headers={"Content-Disposition": 'attachment; filename="printlab-interface-config.json"', "Cache-Control": "no-store"})
 
+    app.include_router(auth_api.router)
     app.include_router(providers_api.router)
     app.include_router(agents_api.router)
     app.include_router(workflows_api.router)

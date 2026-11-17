@@ -34,7 +34,8 @@ def test_page_and_assets_load_without_a_token_and_carry_strict_headers(client, p
 
 
 def test_the_page_holds_no_secret_and_the_api_it_calls_still_demands_the_token(client):
-    assert "x-admin-token" in JS  # the script sends it ...
+    # The page signs in through a session, not through a token it carries: nothing in it names the header or the file.
+    assert "x-admin-token" not in JS and "admin_token" not in JS and "Login.headers(" in JS
     for secret_file in (client.app.state.settings.data_dir / "admin_token",):
         if secret_file.exists():
             assert secret_file.read_text().strip() not in client.get("/chat/app.js").text + client.get("/chat").text
@@ -61,10 +62,10 @@ def test_html_has_no_inline_script_style_handler_or_remote_reference():
 
 
 def test_html_has_labels_and_live_regions_for_assistive_tech():
-    for control in ("token", "agent", "model", "message"):
+    for control in ("setup-pass", "setup-pass2", "login-pass", "agent", "model", "message"):
         assert f'for="{control}"' in HTML, f"no <label for={control}>"
     assert 'role="log"' in HTML and 'aria-live="polite"' in HTML and 'role="alert"' in HTML
-    assert 'type="password"' in HTML and 'autocomplete="off"' in HTML
+    assert 'type="password"' in HTML and 'autocomplete="new-password"' in HTML and 'autocomplete="current-password"' in HTML
 
 
 @pytest.mark.parametrize(
@@ -82,10 +83,12 @@ def test_script_avoids_dangerous_apis(pattern, why):
     assert not re.search(pattern, code), why
 
 
-def test_script_renders_server_text_only_through_textContent_and_clears_the_token_field():
+def test_script_renders_server_text_only_through_textContent_and_clears_the_passphrase_fields():
     assert JS.count("textContent") >= 6
-    assert re.search(r'\$\("token"\)\.value\s*=\s*""', JS), "the token input must be emptied after use"
-    assert 'credentials: "omit"' in JS and 'cache: "no-store"' in JS
+    login = (WEB / "login.js").read_text(encoding="utf-8")
+    for field in ("setup-pass", "setup-pass2", "login-pass"):
+        assert re.search(r'\$\("' + field + r'"\)\.value\s*=\s*""', login), f"{field} must be emptied as soon as it is read"
+    assert 'credentials: "same-origin"' in JS and 'cache: "no-store"' in JS and 'credentials: "omit"' not in JS
 
 
 def test_css_has_no_remote_imports_and_respects_keyboard_focus():
@@ -134,11 +137,22 @@ def test_workflow_answers_are_exactly_yes_or_no_in_the_script():
     assert not re.search(r"answer\s*[:=]\s*\$\(", code), "the answer must never be read from free text"
 
 
-def test_workflow_lists_load_only_after_the_token_gate_is_passed():
+def test_workflow_lists_load_only_after_the_person_is_signed_in():
     code = re.sub(r"//[^\n]*", "", JS)
-    gate = code[code.index('$("gate-form").addEventListener'):]
-    ok_at = gate.index('$("conn").classList.add("ok")')
-    assert "loadWorkflows()" in gate[ok_at:ok_at + 200]
+    ready = code[code.index("Login.start(async () => {"):]
+    assert "loadAgents()" in ready and ready.index("loadAgents()") < ready.index("loadWorkflows()")
+    # nothing is requested at load time except the sign-in state: the data calls all sit inside the callback
+    before = code[:code.index("Login.start(async () => {")]
+    assert "loadWorkflows()" not in before.replace("async function loadWorkflows()", "")
+
+
+def test_the_sign_in_script_never_stores_anything_or_builds_markup():
+    login = re.sub(r"//[^\n]*", "", (WEB / "login.js").read_text(encoding="utf-8"))
+    for banned in ("localStorage", "sessionStorage", "document.cookie", "innerHTML", "eval(", "location.hash", "location.search", "console.log"):
+        assert banned not in login, banned
+    # the passphrase is sent once, in a request body, never in an address or a header
+    assert "passphrase" in login and "x-admin-token" not in login
+    assert login.count("fetch(") == 3  # state, the shared post helper, logout
 
 
 @pytest.mark.parametrize("name,html,js", [("chat", HTML, JS), ("admin", (WEB / "admin.html").read_text(encoding="utf-8"), (WEB / "admin.js").read_text(encoding="utf-8"))])

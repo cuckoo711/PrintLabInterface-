@@ -95,7 +95,7 @@ stages:
             break
         time.sleep(0.1)
     assert server.started, "server did not start"
-    token = (settings.data_dir / "admin_token").read_text().strip()
+    PASS = "smoke test passphrase 123"
     base = f"http://127.0.0.1:{port}"
     results: list[tuple[str, bool, str]] = []
 
@@ -105,7 +105,8 @@ stages:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(channel="msedge", headless=True)
-        page = browser.new_page()
+        context = browser.new_context()  # one browser profile: every page below that says "same browser" shares its session
+        page = context.new_page()
         csp_violations: list[str] = []
         console_errors: list[str] = []
         outside_requests: list[str] = []
@@ -115,19 +116,22 @@ stages:
         page.add_init_script("document.addEventListener('securitypolicyviolation', e => (window.__csp = (window.__csp||[]).concat(e.violatedDirective + ' ' + e.blockedURI)))")
 
         page.goto(base + "/chat")
-        check("page loads and shows the token gate", page.is_visible("#gate") and not page.is_visible("#app"))
+        page.wait_for_selector("#setup:not([hidden])", timeout=8000)  # the page first asks the server whether a passphrase exists
+        check("first visit: the page offers to set a passphrase and shows no token field",
+              page.is_visible("#setup") and not page.is_visible("#login") and not page.is_visible("#app") and page.locator("#token").count() == 0)
+        check("first visit: the page does not mention any token file", "admin_token" not in page.content() and "令牌" not in page.inner_text("#gate"))
         check("title", page.title() == "PrintLabInterface")
 
-        page.fill("#token", "definitely-wrong-token")
-        page.click("#gate-form button")
+        page.fill("#setup-pass", PASS); page.fill("#setup-pass2", "something else entirely")
+        page.click("#setup-form button")
         page.wait_for_selector("#gate-error:not([hidden])", timeout=5000)
-        check("wrong token is rejected with a message", "令牌" in page.inner_text("#gate-error") and page.is_visible("#gate"))
-        check("token field is emptied after use", page.input_value("#token") == "")
+        check("first visit: two different passphrases are refused", "不一样" in page.inner_text("#gate-error") and page.is_visible("#setup"))
+        check("first visit: both fields are emptied after use", page.input_value("#setup-pass") == "" and page.input_value("#setup-pass2") == "")
 
-        page.fill("#token", token)
-        page.click("#gate-form button")
-        page.wait_for_selector("#app:not([hidden])", timeout=5000)
-        check("correct token opens the app", page.is_visible("#app") and not page.is_visible("#gate"))
+        page.fill("#setup-pass", PASS); page.fill("#setup-pass2", PASS)
+        page.click("#setup-form button")
+        page.wait_for_selector("#app:not([hidden])", timeout=8000)
+        check("setting a passphrase opens the app", page.is_visible("#app") and not page.is_visible("#gate"))
         check("connection pill says connected", page.inner_text("#conn") == "已连接")
         agent_options = page.eval_on_selector_all("#agent option", "els => els.map(e => e.value)")
         check("agents are listed", "helper" in agent_options, str(agent_options))
@@ -173,12 +177,13 @@ stages:
 
         # --- reopen a stored session ---
         page.reload()
-        page.fill("#token", token); page.click("#gate-form button")
-        page.wait_for_selector("#app:not([hidden])", timeout=5000)
-        check("a reload asks for the token again (it was never persisted)", True)
+        page.wait_for_selector("#app:not([hidden])", timeout=8000)
+        check("a reload keeps the person signed in (no second prompt)", page.is_visible("#app") and not page.is_visible("#gate"))
         storage = page.evaluate("JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage), document.cookie])")
-        check("nothing is stored in localStorage, sessionStorage or cookies", storage == '[[],[],""]', storage)
-        check("token is not in the page URL", token not in page.url)
+        check("the page can read no cookie and stores nothing in the browser (the session cookie is HttpOnly)", storage == '[[],[],""]', storage)
+        cookies = {c["name"]: c for c in page.context.cookies()}
+        check("the session cookie is HttpOnly and SameSite=Strict", "pli_session" in cookies and cookies["pli_session"]["httpOnly"] and cookies["pli_session"]["sameSite"] == "Strict", str(cookies.get("pli_session")))
+        check("the passphrase is not in the page address", PASS not in page.url)
         page.locator("#sessions button").first.click()
         expect(page.locator("#log .msg")).to_have_count(5, timeout=5000)  # 3 runs: 2 + 2 + 1 (the cancelled run keeps only the user's line)
         check("opening a stored session restores its messages", "status please" in page.inner_text("#log"))
@@ -186,8 +191,7 @@ stages:
 
         # --- workflows ---
         page.reload()
-        page.fill("#token", token); page.click("#gate-form button")
-        page.wait_for_selector("#app:not([hidden])", timeout=5000)
+        page.wait_for_selector("#app:not([hidden])", timeout=8000)
         expect(page.locator("#wf-name option")).to_have_count(1, timeout=5000)
         check("workflow list is loaded after the token gate", page.eval_on_selector_all("#wf-name option", "els => els.map(e => e.value)") == ["flow"])
 
@@ -221,7 +225,7 @@ stages:
               page.evaluate("JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage), document.cookie])") == '[[],[],""]')
 
         # --- admin page ---
-        admin = browser.new_page()
+        admin = context.new_page()  # same browser as the chat page, so it shares the session
         admin_errors: list[str] = []
         admin_outside: list[str] = []
         admin.on("console", lambda m: (admin_errors.append(m.text) if m.type == "error" else None))
@@ -229,13 +233,22 @@ stages:
         admin.on("request", lambda r: admin_outside.append(r.url) if not r.url.startswith(base) else None)
         admin.add_init_script("document.addEventListener('securitypolicyviolation', e => (window.__csp = (window.__csp||[]).concat(e.violatedDirective + ' ' + e.blockedURI)))")
         admin.goto(base + "/admin")
-        check("admin: page loads behind the token gate", admin.is_visible("#gate") and not admin.is_visible("#admin"))
-        admin.fill("#token", "definitely-wrong-token"); admin.click("#gate-form button")
-        admin.wait_for_selector("#gate-error:not([hidden])", timeout=5000)
-        check("admin: wrong token is rejected", "令牌" in admin.inner_text("#gate-error") and admin.is_visible("#gate"))
-        admin.fill("#token", token); admin.click("#gate-form button")
+        check("admin: the same browser is already signed in, no second prompt", admin.is_visible("#admin") or admin.wait_for_selector("#admin:not([hidden])", timeout=8000) is not None)
+        # a visitor with no session at all is asked to log in, and a wrong passphrase is refused
+        stranger = browser.new_context().new_page()
+        stranger.goto(base + "/admin")
+        stranger.wait_for_selector("#login:not([hidden])", timeout=5000)
+        check("admin: a visitor with no session sees the login form, not the data", stranger.is_visible("#login") and not stranger.is_visible("#admin"))
+        stranger.fill("#login-pass", "definitely-wrong-passphrase"); stranger.click("#login-form button")
+        stranger.wait_for_selector("#gate-error:not([hidden])", timeout=5000)
+        check("admin: a wrong passphrase is refused", "口令不对" in stranger.inner_text("#gate-error") and stranger.is_visible("#login") and not stranger.is_visible("#admin"))
+        check("admin: the login field is emptied after use", stranger.input_value("#login-pass") == "")
+        stranger.fill("#login-pass", PASS); stranger.click("#login-form button")
+        stranger.wait_for_selector("#admin:not([hidden])", timeout=8000)
+        check("admin: the right passphrase opens it for the other browser too", stranger.is_visible("#admin"))
+        stranger.context.close()
         admin.wait_for_selector("#admin:not([hidden])", timeout=5000)
-        check("admin: correct token opens it", admin.inner_text("#conn") == "已连接" and admin.input_value("#token") == "")
+        check("admin: connected", admin.inner_text("#conn") == "已连接")
         check("admin: the seeded provider and its key hint are listed, the key is not",
               "oa" in admin.inner_text("#providers") and "sk-smoke-fake-0123456789" not in admin.content())
 
@@ -282,7 +295,8 @@ stages:
         check("admin: the audit table shows the export, without any key", "ABCDEFGH12345" not in admin.inner_text("#audit"))
 
         admin.reload()
-        check("admin: a reload asks for the token again", admin.is_visible("#gate"))
+        admin.reload(); admin.wait_for_selector("#admin:not([hidden])", timeout=8000)
+        check("admin: a reload keeps the session", admin.is_visible("#admin"))
         check("admin: nothing is stored in the browser",
               admin.evaluate("JSON.stringify([Object.keys(localStorage), Object.keys(sessionStorage), document.cookie])") == '[[],[],""]')
         check("admin: zero Content-Security-Policy violations", not admin.evaluate("window.__csp || []"), str(admin.evaluate("window.__csp || []")))
@@ -303,10 +317,10 @@ stages:
         opened.value.close()
 
         # --- hand-off of a draft from the PrintLab workbench ---
-        draft_page = browser.new_page()
+        draft_page = context.new_page()
         draft_page.goto(base + "/chat#draft=" + "%E6%83%B3%E5%81%9A%3A%20%26%20%3Cb%3Ex%3C%2Fb%3E%20100%25%0A%E7%AC%AC%E4%BA%8C%E8%A1%8C" + "%07%1B")
         check("draft: removed from the address as soon as the page loads", "draft" not in draft_page.url and draft_page.url.endswith("/chat"), draft_page.url)
-        draft_page.fill("#token", token); draft_page.click("#gate-form button")
+        # same browser, so the session already exists: no sign-in step here
         draft_page.wait_for_selector("#app:not([hidden])", timeout=8000); draft_page.wait_for_timeout(400)
         filled = draft_page.input_value("#message")
         check("draft: placed in the message box as plain text, line break kept, control characters dropped",
@@ -316,17 +330,27 @@ stages:
         # The smoke server only has a "helper" role, so the "project" role is not offered here; the page must not fail because of that.
         check("draft: a missing project role does not break the hand-off", draft_page.input_value("#agent") == "helper")
         draft_page.reload()
-        check("draft: does not come back after a reload", draft_page.is_visible("#gate"))
-        long_page = browser.new_page()
+        draft_page.wait_for_selector("#app:not([hidden])", timeout=8000); draft_page.wait_for_timeout(300)
+        check("draft: does not come back after a reload", draft_page.input_value("#message") == "" and "draft" not in draft_page.url)
+        long_page = context.new_page()
         long_page.goto(base + "/chat#draft=" + "a" * 6000)
-        long_page.fill("#token", token); long_page.click("#gate-form button")
         long_page.wait_for_selector("#app:not([hidden])", timeout=8000); long_page.wait_for_timeout(300)
         check("draft: an oversized draft is cut to 2000 characters", len(long_page.input_value("#message")) == 2000, str(len(long_page.input_value("#message"))))
-        bad_page = browser.new_page()
+        bad_page = context.new_page()
         bad_page.goto(base + "/chat#draft=%E0%A4%A")  # not valid percent-encoding
-        bad_page.fill("#token", token); bad_page.click("#gate-form button")
         bad_page.wait_for_selector("#app:not([hidden])", timeout=8000)
         check("draft: a malformed draft is ignored without breaking the page", bad_page.input_value("#message") == "" and bad_page.is_visible("#app"))
+
+        # --- logging out (last, because it ends the session every page above shared) ---
+        admin.goto(base + "/admin"); admin.wait_for_selector("#admin:not([hidden])", timeout=8000)
+        admin.click("#logout")
+        admin.wait_for_selector("#login:not([hidden])", timeout=8000)
+        check("logout: ends the session and asks for the passphrase again", admin.is_visible("#login") and not admin.is_visible("#admin"))
+        admin.goto(base + "/admin")
+        check("logout: afterwards the data is no longer reachable", admin.is_visible("#login") and not admin.is_visible("#admin"))
+        page.reload()
+        page.wait_for_selector("#login:not([hidden])", timeout=8000)
+        check("logout: the chat page in the same browser is signed out as well", page.is_visible("#login") and not page.is_visible("#app"))
 
         # --- browser-level security signals ---
         check("zero Content-Security-Policy violations", not page.evaluate("window.__csp || []"), str(page.evaluate("window.__csp || []")))

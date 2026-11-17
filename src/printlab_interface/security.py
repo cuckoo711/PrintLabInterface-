@@ -4,8 +4,9 @@ The service listens on loopback only, but that alone does not stop a web page in
 user's browser from reaching it (DNS rebinding) or another local program from calling it.
 Two checks:
   * Host header allow-list: the request must be addressed to a loopback name and our port;
-  * admin token on every route that touches providers or keys. The token is random,
-    created on first start, stored in data/admin_token, and never logged or returned.
+  * proof of who is asking on every route that touches providers or keys. A person proves it with a passphrase they set
+    themselves and a browser session (see auth.py). A script proves it with the older token header: a random token created
+    on first start and stored in data/admin_token, never logged or returned.
 """
 from __future__ import annotations
 
@@ -60,7 +61,19 @@ class HostGuard(BaseHTTPMiddleware):
 
 
 def require_admin(request: Request) -> None:
-    expected: str = request.app.state.admin_token
     supplied = request.headers.get(HEADER, "")
-    if not supplied or not hmac.compare_digest(supplied.encode(), expected.encode()):
+    if supplied:
+        expected: str = request.app.state.admin_token
+        if hmac.compare_digest(supplied.encode(), expected.encode()):
+            return
         raise HTTPException(status_code=401, detail="admin token required")
+    # A browser session. Every request is checked for its origin; every change also needs the session's CSRF value.
+    from . import auth, db
+
+    with db.session(request.app.state.settings.db_path) as conn:
+        session = auth.session_from_request(request, conn)
+    if session is None:
+        raise HTTPException(status_code=401, detail="login required")
+    auth.check_origin(request)
+    if request.method not in auth.SAFE_METHODS and not auth.csrf_ok(request, session):
+        raise HTTPException(status_code=403, detail="csrf token missing or wrong")
