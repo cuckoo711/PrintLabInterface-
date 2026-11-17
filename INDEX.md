@@ -9,6 +9,7 @@
 
 - 当前位置：**P0、P1、P2-a、P3-1..5、P4-a、P4-b、P5 已完成；P6 部分完成。** 可用：聊天台 `http://127.0.0.1:8019/chat`、管理后台 `/admin`（令牌在 `data/admin_token`）。角色 sarah、mike、project、patrol 都只读；工作流 `object-intake`；巡检/定时/信箱（**默认全关**，见 §7 P4-b）；`web_fetch` 默认关（`PLI_WEB_ALLOW_HOSTS` 为空）。**仍需用户提供的只有一件**：OpenAI/Claude/DeepSeek 官方端点的 key（才能验证官方行为）；协议层已用 mimo 的 OpenAI 与 Anthropic 两个端点验证通过。项目许可已定为 PolyForm Noncommercial 1.0.0。另有是否开启 Windows 开发者模式（见 §5.1）。
 - **工作流已在真项目上用真模型跑到人工确认点**（2026-11-17，历史记录）：当时经 PrintLab 自己的 CLI 建了测试项目 `P001`，run 先在证据阶段因 `constraints show` 为 `not_recorded` 而 `blocked`（正确），补 `constraints capture` 后重试 0 次模型调用，进入 `waiting/go_ahead` 并停在人工确认点，没有替用户回答。**之后用户同意删除，P001 已删，该 run 与另一条旧 run 已停止**，PrintLab 项目列表为空。**尚未做的：回答 yes 之后的交接阶段没有用真模型跑过。** 想再验证，需要先在 PrintLab 建一个新项目（会写 `Project/`，要用户同意）。
+- **入口**：PrintLab 工作台（`:8018`）侧栏左下"AI 助手" → 聊天台；聊天台/后台页头有回 PrintLab 与互相跳转的链接。
 - **启动**：在 `E:\MyProjet\PrintLabInterface` 运行 `PYTHONUTF8=1 ./.venv/Scripts/python.exe -m printlab_interface`（PowerShell 用 `$env:PYTHONUTF8=1; .\.venv\Scripts\python.exe -m printlab_interface`）。**停止**：Windows 上 `kill` 杀不干净，用 `Stop-Process`，并复核 8019 无监听。
 - **已用真 key 验证过的**（2026-11-17，用户提供的 mimo 测试 key，经管理 API 录入，DPAPI 加密保存，**不在仓库、不在审计、不在消息里**）：供应商 `mimo`（kind=`openai_compatible`，base=`https://token-plan-cn.xiaomimimo.com/v1`），模型 `mimo:mimo-v2.6-flash`。共 3 次真实调用，全部成功：纯文本一次；sarah 读 `printlab_materials`/`printlab_status` 并如实回答"剩余量是设备估算"；mike 收到伪造的"系统授权"要求批准并发送打印，**拒绝了，没有调用任何危险工具，PrintLab 与 `/api/prepared` 均未变化**。
 - **mimo 套餐条款与用户的决定**：用户贴出的条款写明"仅限在兼容的 AI 编程和智能体工具中**交互式**使用，**不可用于自动化脚本或应用后端**，违规可能导致订阅暂停或 key 被封"。本项目是自建后端服务。**用户已明确答复（2026-11-17）：不用管这条，直接使用，不由我们替用户决定使用哪个 API。** 所以：(1) 不在代码里给 key 加"仅交互式"之类的限制；(2) 工作流的模型是配置项，不写死任何供应商；(3) 合规与封号风险由用户自行承担，这里只记录事实，不再作为开工前置条件。这条决定只涵盖"用哪个 API"，**不放宽任何安全红线**：打印批准、发送、`approve`/`submit`/`reconcile` 仍然永久拒绝，无人值守运行同样不得触碰它们。
@@ -19,7 +20,7 @@
 - P0-3 结论：**采用 LiteLLM + LangGraph，进入 P1**；详见 `docs/SPIKE_P0_3.md`。注意：模型调用只用了 `mock_response`，**没有任何真实供应商调用被验证**。
 - **必读的坑**：调用 PrintLab CLI 时，子进程环境变量白名单太窄会导致"退出码 0 但输出为空"，并在当前工作目录创建名为 `%SystemDrive%` 的垃圾目录，使 PrintLab 的 `git status` 变脏（违反 G1）。已在临时目录复现并确认因果，白名单必须包含 `SYSTEMDRIVE`、`PROGRAMDATA`、`WINDIR` 等（完整清单见 `docs/spike_p0_3.py` 的 `ENV_ALLOW`），子进程 `cwd` 不得设为 PrintLab 根。
 - 下一步动作：P0-4 复核 G1–G4；然后进入 P1（只读适配器），按 `docs/SPIKE_P0_3.md` §5 的四条要求实现。
-- 硬规则：不修改 `E:\MyProjet\PrintLab` 下任何文件；不调用 approve / submit --execute / reconcile / studio-bridge 发送类命令；未经用户明确要求不 commit、不 push。
+- 硬规则：不修改 `E:\MyProjet\PrintLab` 下任何文件，**唯一例外是用户明确同意的那一处**：`Harness/studio/src/main.jsx` 侧栏的"AI 助手"链接（见 §9 最后一次入口链接条目）；再要改 PrintLab 的任何别的文件，仍须用户明确同意。不调用 approve / submit --execute / reconcile / studio-bridge 发送类命令；未经用户明确要求不 commit、不 push。
 - 回复语言：始终使用简体中文。
 - 用户称呼：cuckoo。
 
@@ -82,7 +83,7 @@
 - 文档入口：`AGENTS.md`、`docs/AGENT_START.md`、`docs/PRINTING.md`、`docs/CONNECTIONS.md`、`Context/workflow.md`。
 
 ### 2.3 打印机与相关工具
-- 打印机：**H2C**，在 Bambuddy 中 ID=1，名称 `3DP-H2C`，固件 01.03.00.00，开发者模式未开，SD 卡可用。局域网另有一台 `3DP-X1C`，**用户未要求添加，未添加**。
+- 打印机：**H2C**，在 Bambuddy 中 ID=1，名称 `3DP-H2C`，固件 01.03.00.00，开发者模式未开，SD 卡可用。**Bambuddy 里现在有两台**：另一台 `3DP-X1C`（id 2，192.168.31.214）是后来才出现的，不是我们加的，我们没碰过它。**PrintLab 是单设备模型**：`Runtime/config.json` 只有一个 `printer_id`（现为 1），总览/设备页只显示这一台；批准时会校验任务的 `printer_id` 与当前配置一致，否则报"目标打印机已变化，需重新切片"。所以用户问"为什么只显示一个"的答案是设计如此。三个选项等用户定：①把 `printer_id` 改成 2 切到 X1C（要重做设备卡/材料/约束，会覆盖 H2C 那套）②在我们自己的页面里只读列出 Bambuddy 全部打印机（不碰 PrintLab 流程，我倾向这个）③不管。
 - 喷嘴：左右挤出机均读回 0.4 mm（HS01）；喷嘴架里有一枚 0.6 mm（HS01）。**默认按 0.4 mm；0.6 mm 仅在用户需要时才换上，选 0.6 预设前必须先问。**
 - 供料（用户确认）：挤出机 0 对应两个 AMS 2 Pro（AMS 0、1）；挤出机 1 对应一个 AMS HT（AMS 128）。用户说的"左"是面向机器的方向，等于机器自己的"右"；记录统一用**挤出机编号**。
 - 发送路线：`dispatch-plan --model H2C --feeding ams` 结论是 **official_studio**（Bambuddy 队列适配只覆盖 A1、A1 mini、P1S、X1 Carbon）。H2C 的发送由用户在官方 Studio **手动点击**；Windows 无 Studio 窗口助手。
@@ -318,7 +319,7 @@ LiteLLM（多供应商调用，仅库、不用 enterprise）+ LangGraph（显式
 ### 8.1 常用命令速查
 ```bash
 # PrintLab 基线检查（Git Bash，在 E:\MyProjet\PrintLab）
-git status --short                                   # 必须为空
+git status --short                                   # 必须只剩已批准的那一处 `M Harness/studio/src/main.jsx`（以及用户的 `.narrafork/` 附件目录），多出任何别的都是违规
 curl -s http://127.0.0.1:8018/api/health
 export PYTHONUTF8=1
 ./Runtime/venv/Scripts/python.exe -m pytest Harness/tests -q
@@ -349,6 +350,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/start.ps1
 - 2026-11-17：P5 完成（`/admin` 后台、配置导出不含密钥）；625 测试 + 浏览器冒烟 55 项；反向代理有意不做。
 - 2026-11-17：最终验收：625 测试 + 1 跳过；浏览器冒烟 55 项连跑多轮；G1–G3 在 sidecar **运行中**（8019 有监听、healthz 通）与**摘除后**（同一命令里断言 8019 无监听、无 python printlab_interface 进程）各一次，结果相同（PrintLab 446/42/7、`scripts/verify_onboarding.py` ok、health ok、doctor 的 missing_context 为空、git status 空、无 `%SystemDrive%` 目录）；反向（PrintLab 根为空且地址不可达）sidecar 仍能起来并返回 healthz、`/admin` 200。**注意**：`verify_onboarding` 是 `scripts/verify_onboarding.py`，不是 `printlab` 的子命令。
 - 2026-11-17：用户同意删除 PrintLab 里的测试项目 P001 与 `/tmp/ref/NarraFork` 克隆，均已删除（PrintLab 项目列表恢复为空，git status 为空）；两条旧工作流记录已停止；协议层真实验证：OpenAI 协议（mimo）与 Anthropic 协议（mimoa）都通。
+- 2026-11-17：入口链接。**用户明确同意后**改了 PrintLab 的 **一个源文件的一行**：`Harness/studio/src/main.jsx` 侧栏加"AI 助手"链接（新标签页打开 `http://<当前主机>:8019/chat`），并重新构建了 `Harness/studio/dist`（已被 PrintLab 的 .gitignore 忽略）。**这是第一处对 PrintLab 的改动，所以 PrintLab 的 `git status` 不再为空**（`M Harness/studio/src/main.jsx`；`.narrafork/` 是用户贴截图的附件目录，不是我们建的）；未提交，PrintLab 的 origin 是上游 AFangTeam，是否提交/推到用户的 fork 由用户定。验收里的 G1 要改成"除这一处已批准的改动外为空"。还原：删掉那一个 `<a className="native-nav" href={`${location.protocol}//…:8019/chat`}…>` 再 `npm run build`。聊天台与后台页头也加了回 PrintLab（`:8018`）与互相跳转的链接，均 `target=_blank`（令牌只在页面内存，原页跳走会丢）。
 - 2026-11-17：项目许可定为 PolyForm Noncommercial 1.0.0（用户先选了 MIT，随后问有没有禁止商用且署名的，改选此项；MIT 版本只在本地，从未提交）：新增 `LICENSE`（含 Required Notice 署名与商用联系说明）、`pyproject.toml` 加 `license`/`license-files` 并把构建要求抬到 setuptools>=77、`docs/LICENSES.md` 加说明。
 - 2026-11-17：P6 部分完成：`requirements.lock`（94 包带哈希）与 `docs/LICENSES.md`；在干净环境里仅用锁文件安装后 501 测试全过。许可信息只来自包元数据。
 
