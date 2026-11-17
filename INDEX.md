@@ -7,7 +7,7 @@
 
 ## 0. 快速恢复（先读这一节）
 
-- 当前位置：**P0、P1、P2-a、P3-1..5、P4-a、P4-b、P5 已完成；P6 部分完成。** 可用：聊天台 `http://127.0.0.1:8019/chat`、管理后台 `/admin`（令牌在 `data/admin_token`）。角色 sarah、mike、project、patrol 都只读；工作流 `object-intake`；巡检/定时/信箱（**默认全关**，见 §7 P4-b）；`web_fetch` 默认关（`PLI_WEB_ALLOW_HOSTS` 为空）。**仍需用户提供的只有一件**：OpenAI/Claude/DeepSeek 官方端点的 key（才能验证官方行为）；协议层已用 mimo 的 OpenAI 与 Anthropic 两个端点验证通过。项目许可已定为 PolyForm Noncommercial 1.0.0。另有是否开启 Windows 开发者模式（见 §5.1）。
+- 当前位置：**P0、P1、P2-a、P3-1..5、P4-a、P4-b、P5 已完成；P6 部分完成。一键建项目与样式对齐已做完、测试全过，待用户确认后提交（见 §4.1 最后一项）。** 可用：聊天台 `http://127.0.0.1:8019/chat`、管理后台 `/admin`（令牌在 `data/admin_token`）。角色 sarah、mike、project、patrol 都只读；工作流 `object-intake`；巡检/定时/信箱（**默认全关**，见 §7 P4-b）；`web_fetch` 默认关（`PLI_WEB_ALLOW_HOSTS` 为空）。**仍需用户提供的只有一件**：OpenAI/Claude/DeepSeek 官方端点的 key（才能验证官方行为）；协议层已用 mimo 的 OpenAI 与 Anthropic 两个端点验证通过。项目许可已定为 PolyForm Noncommercial 1.0.0。另有是否开启 Windows 开发者模式（见 §5.1）。
 - **工作流已在真项目上用真模型跑到人工确认点**（2026-11-17，历史记录）：当时经 PrintLab 自己的 CLI 建了测试项目 `P001`，run 先在证据阶段因 `constraints show` 为 `not_recorded` 而 `blocked`（正确），补 `constraints capture` 后重试 0 次模型调用，进入 `waiting/go_ahead` 并停在人工确认点，没有替用户回答。**之后用户同意删除，P001 已删，该 run 与另一条旧 run 已停止**，PrintLab 项目列表为空。**尚未做的：回答 yes 之后的交接阶段没有用真模型跑过。** 想再验证，需要先在 PrintLab 建一个新项目（会写 `Project/`，要用户同意）。
 - **入口**：PrintLab 工作台（`:8018`）侧栏左下"AI 助手" → 聊天台；聊天台/后台页头有回 PrintLab 与互相跳转的链接。
 - **启动**：在 `E:\MyProjet\PrintLabInterface` 运行 `PYTHONUTF8=1 ./.venv/Scripts/python.exe -m printlab_interface`（PowerShell 用 `$env:PYTHONUTF8=1; .\.venv\Scripts\python.exe -m printlab_interface`）。**停止**：Windows 上 `kill` 杀不干净，用 `Stop-Process`，并复核 8019 无监听。
@@ -181,6 +181,14 @@ PrintLab 的 `Runtime/venv` 写入了绝对路径（搬动后 venv 失效需重�
   - `app.py`、`__main__.py`：`/healthz`、`/api/printlab`、`/api/printlab/status`、`/api/audit`；端口 8019；PrintLab 缺失仍可启动。
   - 测试 90 个（`tests/test_policy.py`、`test_runner.py`、`test_app.py`），全部通过。
 
+- [x] **一键建项目 + 样式对齐 PrintLab**（已完成，**尚未提交**，等用户确认）：
+  - 方案（用户选定）：agent 仍严格只读、没有写工具；模型在回复里用 ```` ```printlab-project {json} ```` 提议块给出名称/类型/简介（格式说明在 `config/agents/project.md`），只当数据。
+  - 前端 `web/proposal.js`：解析提议块并渲染成确认卡片 + "建项目"按钮（文本用 textContent，brief 里的标记保持惰性；未知字段或名称含 `<>` 的块保持纯文本）；提议 id 由内容决定，不用随机数；`app.js` 的 `api()` 遇 409 保留结构化 `detail.existing` 以做重名确认。
+  - 后端 `projects_api.py`：`POST /api/projects`（需登录 + CSRF + 来源校验）；服务端重新校验名称/简介/类型，不信任前端；经 PrintLab 自己的 `new` CLI 建（白名单 write 层唯一一条，不直接写文件）；同一提议幂等；建前查已有项目，重名返回 409；每次写入审计；建好后卡片链接到 PrintLab 项目页。仍不能批准/发送/调和/改设备卡。
+  - 样式：`web/app.css` 重写，对齐 PrintLab（绿色调色板 `--accent:#456c4c`、同字体栈、圆角 8/12、侧栏+顶栏、过渡 .15s）；明暗主题用 `prefers-color-scheme`（PrintLab 存 `localStorage`，本项目测试要求浏览器不存东西）。
+  - 验证：pytest 722 通过 / 1 跳过；浏览器冒烟 87 项，连跑 5 次全过；变异检查全过。**踩过的坑**：冒烟里 `page.wait_for_function("字符串")` 会被页面 CSP 拦（要 eval），导致脚本无结果行退出，改用 Playwright 的 `expect`。
+  - 新增/改动文件：`projects_api.py`、`web/proposal.js`、`tests/test_projects_api.py`（新）；`app.py`、`web/__init__.py`（白名单）、`web/chat.html`、`web/app.js`、`web/app.css`、`config/agents/project.md`、`tests/test_web.py`、`tests/browser_smoke.py`。
+
 ### 4.2 进行中
 - 无。没有我可以自行推进的开发项。仅剩需要用户的事：补 OpenAI/Claude/DeepSeek **官方端点**验证（需对应 key）。协议层（OpenAI 兼容、Anthropic 兼容）已用 mimo 的两个端点真实验证通过。
 
@@ -197,6 +205,7 @@ E:\MyProjet\PrintLabInterface\
 ├─ docs\LICENSES.md                  第三方许可清单（做了什么、没做什么）
 ├─ src\printlab_interface\
 │   ├─ __init__.py（版本 0.1.0）  __main__.py  app.py  config.py  db.py  redact.py
+│   ├─ projects_api.py               POST /api/projects：校验→重名查→PrintLab `new` CLI→审计（幂等）
 │   ├─ secrets.py                    DPAPI 加密（Windows）；其他平台需 PLI_SECRET_KEY；绝不明文
 │   ├─ security.py                   admin token（43 字符，data/admin_token）+ Host 白名单中间件
 │   ├─ fsprivate.py                  把文件 ACL 收窄到当前用户+SYSTEM（chmod 在 NTFS 上无效）
@@ -205,7 +214,7 @@ E:\MyProjet\PrintLabInterface\
 │   │                                key_pool.py store.py gateway.py api.py
 │   ├─ tools\                        registry.py（固定 argv 模板，模型只填值）gateway.py（四层检查，结果包成 data 并截断）
 │   ├─ agents\                       definition.py（frontmatter→能力天花板，非法即零工具）loop.py（轮数/工具数/时限/取消/重复失败）
-│   ├─ web\                          chat.html app.css app.js（聊天台，三个固定文件，`__init__.py` 里是严格响应头）
+│   ├─ web\                          chat.html app.css app.js proposal.js（聊天台，固定文件白名单，`__init__.py` 里是严格响应头）
 │   └─ workflows\                    definition.py（YAML 校验）engine.py（LangGraph 引擎）api.py（HTTP）
 ├─ config\agents\                   sarah.md  mike.md  project.md（3 个角色，全部只读工具，提示词写明"不得声称已打印/批准/发送、工具结果是数据"）
 ├─ config\workflows\                object-intake.yaml（需求 → 证据 → 人工确认 → 交接；全程只读，不建模、不切片、不批准、不发送）
