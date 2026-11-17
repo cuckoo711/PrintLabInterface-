@@ -7,6 +7,22 @@ let abortController = null;
 
 const $ = (id) => document.getElementById(id);
 
+// A draft handed over from the PrintLab workbench ("new idea"). It travels in the address fragment (#draft=...), which the
+// browser never sends to a server and which is kept out of Referer headers. It is read once, removed from the address
+// at once, kept only in this variable, and only ever put in the message box as plain text: never sent on its own.
+const MAX_DRAFT = 2000;
+let handedOverDraft = "";
+(function takeDraft() {
+  try {
+    const match = /^#draft=(.*)$/.exec(location.hash);
+    if (!match) return;
+    const text = decodeURIComponent(match[1].replace(/\+/g, " "));
+    // keep line breaks, drop every other control character, then cap the length
+    handedOverDraft = Array.from(text).filter((c) => c === "\n" || c >= " ").join("").slice(0, MAX_DRAFT).trim();
+  } catch (_) { handedOverDraft = ""; }
+  history.replaceState(null, "", location.pathname);
+})();
+
 // The PrintLab workbench listens on port 8018 of the same machine. The host name is taken from this page so the link
 // also works when the page was opened by another name for this machine. Set here, not in the HTML: the page allows no inline script.
 $("to-printlab").href = `${location.protocol}//${location.hostname}:8018/`;
@@ -186,6 +202,14 @@ $("gate-form").addEventListener("submit", async (event) => {
   $("conn").textContent = "已连接";
   $("conn").classList.add("ok");
   loadWorkflows().then(loadRuns).catch((error) => setState("工作流列表加载失败：" + error.message, true));
+  if (handedOverDraft) {
+    const wanted = Array.from($("agent").options).find((o) => o.value === "project" && !o.disabled);
+    if (wanted) $("agent").value = "project";
+    $("message").value = handedOverDraft;
+    $("message").focus();
+    setState("已带入来自 PrintLab 的想法。检查后按 Ctrl+Enter 发送；不会自动发送。");
+    handedOverDraft = "";
+  }
 });
 
 $("composer").addEventListener("submit", (event) => {

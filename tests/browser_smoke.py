@@ -302,6 +302,32 @@ stages:
               opened.value.url.endswith("/admin") and page.is_visible("#app") and page.is_visible("#chat"))
         opened.value.close()
 
+        # --- hand-off of a draft from the PrintLab workbench ---
+        draft_page = browser.new_page()
+        draft_page.goto(base + "/chat#draft=" + "%E6%83%B3%E5%81%9A%3A%20%26%20%3Cb%3Ex%3C%2Fb%3E%20100%25%0A%E7%AC%AC%E4%BA%8C%E8%A1%8C" + "%07%1B")
+        check("draft: removed from the address as soon as the page loads", "draft" not in draft_page.url and draft_page.url.endswith("/chat"), draft_page.url)
+        draft_page.fill("#token", token); draft_page.click("#gate-form button")
+        draft_page.wait_for_selector("#app:not([hidden])", timeout=8000); draft_page.wait_for_timeout(400)
+        filled = draft_page.input_value("#message")
+        check("draft: placed in the message box as plain text, line break kept, control characters dropped",
+              "& <b>x</b> 100%" in filled and "\n第二行" in filled and "\x07" not in filled and "\x1b" not in filled, repr(filled))
+        check("draft: never sent on its own", draft_page.locator(".msg").count() == 0)
+        check("draft: no markup was created from it", draft_page.locator("#message b, #log b").count() == 0)
+        # The smoke server only has a "helper" role, so the "project" role is not offered here; the page must not fail because of that.
+        check("draft: a missing project role does not break the hand-off", draft_page.input_value("#agent") == "helper")
+        draft_page.reload()
+        check("draft: does not come back after a reload", draft_page.is_visible("#gate"))
+        long_page = browser.new_page()
+        long_page.goto(base + "/chat#draft=" + "a" * 6000)
+        long_page.fill("#token", token); long_page.click("#gate-form button")
+        long_page.wait_for_selector("#app:not([hidden])", timeout=8000); long_page.wait_for_timeout(300)
+        check("draft: an oversized draft is cut to 2000 characters", len(long_page.input_value("#message")) == 2000, str(len(long_page.input_value("#message"))))
+        bad_page = browser.new_page()
+        bad_page.goto(base + "/chat#draft=%E0%A4%A")  # not valid percent-encoding
+        bad_page.fill("#token", token); bad_page.click("#gate-form button")
+        bad_page.wait_for_selector("#app:not([hidden])", timeout=8000)
+        check("draft: a malformed draft is ignored without breaking the page", bad_page.input_value("#message") == "" and bad_page.is_visible("#app"))
+
         # --- browser-level security signals ---
         check("zero Content-Security-Policy violations", not page.evaluate("window.__csp || []"), str(page.evaluate("window.__csp || []")))
         # Exactly one error is expected: the 401 from the deliberately wrong token. Anything else is a defect.

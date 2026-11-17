@@ -76,6 +76,9 @@ def test_html_has_labels_and_live_regions_for_assistive_tech():
 )
 def test_script_avoids_dangerous_apis(pattern, why):
     code = re.sub(r"//[^\n]*", "", JS)  # comments may mention what is avoided
+    # The one reviewed use of location.hash: reading a draft handed over from the PrintLab workbench. It is not the token,
+    # and it is pinned to this exact expression so any other read of the address still fails this test.
+    code = code.replace("/^#draft=(.*)$/.exec(location.hash)", "")
     assert not re.search(pattern, code), why
 
 
@@ -150,3 +153,26 @@ def test_both_pages_link_to_the_printlab_workbench_without_losing_the_token(name
     # Every link to another page opens in a new tab, for the same reason.
     for tag in re.findall(r'<a [^>]*href="/(?:chat|admin)"[^>]*>', html):
         assert 'target="_blank"' in tag and 'rel="noreferrer"' in tag, (name, tag)
+
+
+def test_the_draft_from_printlab_is_read_once_stripped_from_the_address_and_never_sent():
+    # Behaviour is proven in a real browser by tests/browser_smoke.py; these checks pin the safety properties of the script itself.
+    assert JS.count("location.hash") == 1 and "/^#draft=(.*)$/.exec(location.hash)" in JS  # the single reviewed read
+    assert "history.replaceState(null" in JS  # the fragment is removed from the address as soon as it is read
+    # the token never touches the address: the hand-off code does not mention it, and nothing else reads the address either
+    takeover = JS[JS.index("(function takeDraft()"):JS.index("})();")]
+    assert "token" not in takeover
+    assert "MAX_DRAFT = 2000" in JS and ".slice(0, MAX_DRAFT)" in JS  # bounded
+    # it is only ever placed in the message box; no code path sends it, stores it, or builds markup from it
+    use = JS[JS.index("if (handedOverDraft) {"):]
+    use = use[:use.index("handedOverDraft = \"\";")]
+    assert '$("message").value = handedOverDraft' in use
+    assert "send(" not in use and "requestSubmit" not in use and "fetch(" not in use and "json(" not in use
+
+
+def test_the_draft_is_cleaned_before_it_is_used():
+    takeover = JS[JS.index("(function takeDraft()"):JS.index("})();")]
+    # control characters other than the line break are dropped, then the text is cut to the cap and trimmed
+    assert r'.filter((c) => c === "\n" || c >= " ")' in takeover
+    assert takeover.index(".filter(") < takeover.index(".slice(0, MAX_DRAFT)") < takeover.index(".trim()")
+    assert "decodeURIComponent(" in takeover and "catch (_)" in takeover  # a malformed fragment is caught, not thrown
