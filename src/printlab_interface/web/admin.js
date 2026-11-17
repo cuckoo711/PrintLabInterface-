@@ -50,12 +50,16 @@ function notice(text, isError = false) {
   node.className = "notice" + (isError ? " error" : "");
 }
 
+// Only the most recently started action may write to the message line. Otherwise a slow earlier action can finish after a
+// later one and overwrite its message, so a refusal would be replaced by an old "saved" and look like a success.
+let latestAction = 0;
 async function guarded(action, okText) {
+  const mine = ++latestAction;
   try {
     await action();
-    if (okText) notice(okText);
+    if (okText && mine === latestAction) notice(okText);
   } catch (error) {
-    notice(error.message || "操作失败", true);
+    if (mine === latestAction) notice(error.message || "操作失败", true);
   }
 }
 
@@ -121,6 +125,24 @@ $("key-form").addEventListener("submit", (event) => {
       { label: $("k-label").value.trim() || "key", api_key: value, priority: Number($("k-priority").value) || 100 });
     await loadProviders();
   }, "密钥已保存（之后不会再显示）");
+});
+
+// ---------------------------------------------------------------- default model
+async function loadDefaultModel() {
+  const data = await json("/api/settings/default-model");
+  $("d-model").value = data.default_model || "";
+  const usable = data.providers.filter((p) => p.enabled && p.has_key).map((p) => p.prefix);
+  $("d-state").textContent = data.default_model
+    ? `当前默认：${data.default_model}`
+    : `还没有设默认模型。可用的供应商前缀：${usable.join("、") || "（还没有带密钥的供应商）"}`;
+}
+
+$("default-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  guarded(async () => {
+    await send("PUT", "/api/settings/default-model", { model: $("d-model").value.trim() });
+    await loadDefaultModel();
+  }, "默认模型已保存");
 });
 
 // ---------------------------------------------------------------- schedules
@@ -273,7 +295,7 @@ function showTab(name) {
 for (const button of document.querySelectorAll("nav button")) {
   button.addEventListener("click", () => {
     showTab(button.dataset.tab);
-    const loaders = { providers: loadProviders, schedules: loadSchedules, mailbox: loadMail, roles: loadRoles, audit: loadAudit };
+    const loaders = { providers: () => Promise.all([loadProviders(), loadDefaultModel()]), schedules: loadSchedules, mailbox: loadMail, roles: loadRoles, audit: loadAudit };
     guarded(loaders[button.dataset.tab]);
   });
 }
@@ -289,5 +311,5 @@ Login.start(async () => {
   $("logout").hidden = false;
   $("logout").addEventListener("click", () => Login.logout());
   syncScheduleForm();
-  await Promise.all([loadProviders(), loadRoles(), loadSchedules(), loadMail()]);
+  await Promise.all([loadProviders(), loadDefaultModel(), loadRoles(), loadSchedules(), loadMail()]);
 });

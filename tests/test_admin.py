@@ -113,3 +113,12 @@ def test_export_of_an_empty_installation_works(tmp_path):
         c.headers.update({security.HEADER: app.state.admin_token})
         data = c.get("/api/export").json()
     assert data["providers"] == [] and data["schedules"] == [] and data["model_overrides"] == []
+
+
+def test_only_the_latest_action_may_write_the_message_line():
+    # A slow earlier action must not overwrite a later action's message: a refusal would look like a success.
+    assert "let latestAction = 0;" in ADMIN_JS
+    guarded = ADMIN_JS[ADMIN_JS.index("async function guarded("):]
+    guarded = guarded[:guarded.index("\n}\n") + 3]
+    assert "const mine = ++latestAction;" in guarded
+    assert guarded.count("mine === latestAction") == 2  # both the success and the error path are guarded

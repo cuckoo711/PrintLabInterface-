@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from printlab_interface import db, security
 from printlab_interface.app import create_app
+from printlab_interface.config import Settings
 from printlab_interface.providers import store
 from printlab_interface.providers.gateway import Gateway, GatewayError
 from printlab_interface.providers.key_pool import KeyPool
@@ -336,3 +337,92 @@ def test_chat_endpoint_exposes_the_truncated_flag(client):
     client.app_state.gateway = Gateway(client.app_state.settings.db_path, pool=KeyPool(), call=lambda **kw: cut)
     body = client.post("/api/chat", json={"model": "oa:gpt-4o-mini", "messages": MSG}).json()
     assert body["truncated"] is True and body["finish_reason"] == "length"
+
+
+# ------------------------------------------------------------------ default model
+
+@pytest.fixture()
+def dm(tmp_path):
+    from printlab_interface import db as _db
+    agents = tmp_path / "agents"; agents.mkdir()
+    (agents / "nomodel.md").write_text("---\nname: nomodel\ntools: [printlab_status]\n---\nBe brief.", encoding="utf-8")
+    (agents / "pinned.md").write_text("---\nname: pinned\nmodel: oa:role-file-model\ntools: [printlab_status]\n---\nBe brief.", encoding="utf-8")
+    settings = Settings(data_dir=tmp_path / "data", printlab_root=None, printlab_url="http://127.0.0.1:9", http_timeout_s=0.5,
+                        extra_hosts=frozenset({"testserver"}), agents_dir=agents, workflows_dir=tmp_path / "w")
+    settings.data_dir.mkdir()
+    conn = _db.connect(settings.db_path); store.init(conn)
+    store.add_provider(conn, "oa", "t", "openai"); store.add_key(conn, "oa", "k", "sk-default-model-0123456789")
+    store.add_provider(conn, "off", "t", "openai"); store.set_enabled(conn, "off", False)
+    conn.close()
+    seen = []
+    def fake(**kw):
+        seen.append(kw["model"])
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None), finish_reason="stop")],
+                               usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+    app = create_app(settings, gateway=Gateway(settings.db_path, pool=KeyPool(), call=fake))
+    with TestClient(app) as c:
+        c.headers.update({security.HEADER: app.state.admin_token})
+        yield SimpleNamespace(client=c, seen=seen, app=app, settings=settings)
+
+
+def chat_once(env, agent, body=None):
+    sid = env.client.post("/api/sessions", json={"agent": agent}).json()["id"]
+    r = env.client.post(f"/api/sessions/{sid}/run", json={"message": "hello", **(body or {})})
+    return r
+
+
+def test_without_any_model_the_error_tells_the_person_what_to_do(dm):
+    r = chat_once(dm, "nomodel")
+    assert r.status_code == 400 and "默认模型" in r.json()["detail"]
+
+
+def test_a_saved_default_model_is_used_when_nothing_else_names_one(dm):
+    assert dm.client.put("/api/settings/default-model", json={"model": "oa:gpt-4o-mini"}).json() == {"default_model": "oa:gpt-4o-mini"}
+    assert chat_once(dm, "nomodel").status_code == 200
+    assert dm.seen == ["openai/gpt-4o-mini"]
+
+
+def test_priority_is_what_was_typed_then_the_role_file_then_the_default(dm):
+    dm.client.put("/api/settings/default-model", json={"model": "oa:the-default"})
+    chat_once(dm, "pinned")                                    # role file beats the default
+    chat_once(dm, "pinned", {"model": "oa:typed-for-this-run"})  # typed beats the role file
+    chat_once(dm, "nomodel")                                   # nothing else: the default
+    assert dm.seen == ["openai/role-file-model", "openai/typed-for-this-run", "openai/the-default"]
+
+
+def test_the_default_survives_a_restart(dm):
+    dm.client.put("/api/settings/default-model", json={"model": "oa:kept"})
+    with TestClient(create_app(dm.settings, gateway=dm.app.state.gateway)) as c2:
+        c2.headers.update({security.HEADER: dm.app.state.admin_token})
+        assert c2.get("/api/settings/default-model").json()["default_model"] == "oa:kept"
+
+
+def test_clearing_the_default_goes_back_to_the_helpful_error(dm):
+    dm.client.put("/api/settings/default-model", json={"model": "oa:x"})
+    assert dm.client.put("/api/settings/default-model", json={"model": ""}).json() == {"default_model": ""}
+    assert chat_once(dm, "nomodel").status_code == 400
+
+
+@pytest.mark.parametrize("bad", ["nocolon", "oa:", ":model", "nope:model", "off:model", "oa:" + "x" * 300, "oa:with\nnewline", "BAD PREFIX:m"])
+def test_a_default_that_cannot_work_is_refused_when_saved_not_on_the_first_message(dm, bad):
+    r = dm.client.put("/api/settings/default-model", json={"model": bad})
+    assert r.status_code == 422, (bad, r.text)
+    assert dm.client.get("/api/settings/default-model").json()["default_model"] == ""
+
+
+def test_the_default_model_routes_need_a_login(dm):
+    anon = TestClient(dm.app)
+    assert anon.get("/api/settings/default-model").status_code == 401
+    assert anon.put("/api/settings/default-model", json={"model": "oa:x"}).status_code == 401
+
+
+def test_the_listing_never_shows_a_key_and_says_which_providers_are_usable(dm):
+    data = dm.client.get("/api/settings/default-model").json()
+    assert {p["prefix"]: p["has_key"] for p in data["providers"]} == {"oa": True, "off": False}
+    assert "sk-default" not in str(data)
+
+
+def test_changing_the_default_is_audited_without_inventing_secrets(dm):
+    dm.client.put("/api/settings/default-model", json={"model": "oa:audited"})
+    rows = dm.client.get("/api/audit?limit=20").json()
+    assert any(r["action"] == "default_model_set" and r["detail"] == "oa:audited" for r in rows)

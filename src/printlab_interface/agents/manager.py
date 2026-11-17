@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from .. import db
+from .. import settings_store
 from . import sessions
 from .definition import AgentDefinition
 from .loop import AgentRunner, Cancel, Event, RunResult
@@ -64,14 +65,21 @@ class RunManager:
         finally:
             conn.close()
 
+    def _default_model(self) -> str:
+        conn = self._conn()
+        try:
+            return settings_store.get_default_model(conn)
+        finally:
+            conn.close()
+
     def active_count(self) -> int:
         with self._lock:
             return len(self._active)
 
     def start(self, agent: AgentDefinition, session_id: str, user_text: str, model: str | None) -> ActiveRun:
-        chosen = model or agent.model
+        chosen = model or agent.model or self._default_model()
         if not chosen:
-            raise RunRefused("no model chosen: pass `model` or set it in the agent file", 400)
+            raise RunRefused("还没有选模型：在页面的“模型”框里填，或到管理后台设一个默认模型", 400)
         if agent.degraded:
             raise RunRefused("agent definition is invalid: " + "; ".join(agent.problems), 400)
         conn = self._conn()

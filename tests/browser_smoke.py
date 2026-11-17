@@ -264,6 +264,16 @@ stages:
               admin.input_value("#k-key") == "" and "ABCDEFGH12345" not in admin.content() and "ABCDEFGH12345" not in admin.inner_text("body"))
 
         admin.on("dialog", lambda d: d.accept())
+        admin.fill("#d-model", "nope:nothing"); admin.click("#default-form button")
+        expect(admin.locator("#notice")).to_contain_text("nope", timeout=5000)  # wait for THIS answer, not the previous action's message
+        check("admin: a default model that cannot work is refused at once, with a reason", "nope" in admin.inner_text("#notice"), admin.inner_text("#notice"))
+        admin.fill("#d-model", "oa:m"); admin.click("#default-form button")
+        expect(admin.locator("#d-state")).to_contain_text("当前默认：oa:m", timeout=5000)
+        check("admin: a valid default model is saved and shown", "oa:m" in admin.inner_text("#d-state"))
+        admin.reload(); admin.wait_for_selector("#admin:not([hidden])", timeout=8000)
+        expect(admin.locator("#d-state")).to_contain_text("当前默认：oa:m", timeout=5000)  # the value arrives after the page is shown
+        check("admin: the default model is still there after a reload (kept on the server, not in the browser)", admin.input_value("#d-model") == "oa:m")
+
         admin.click("button[data-tab=schedules]")
         check("admin: scheduler shows as switched off with no schedules", "关闭" in admin.inner_text("#sched-global"))
         check("admin: manual run is not offered while the scheduler is off", admin.locator("#schedules button:has-text('立即运行一次')").count() == 0)
@@ -277,7 +287,7 @@ stages:
         admin.fill("#s-name", "uncapped"); admin.fill("#s-interval", "900"); admin.fill("#s-prompt", "hi")
         admin.evaluate("document.getElementById('s-runs').required = false; document.getElementById('s-tokens').required = false")
         admin.click("#sched-form button")
-        expect(admin.locator("#notice")).to_have_class("notice error", timeout=5000)
+        expect(admin.locator("#notice")).to_contain_text("max_runs", timeout=5000)  # this refusal, not an earlier success message
         check("admin: the server still refuses a schedule without caps", "max_runs" in admin.inner_text("#notice"), admin.inner_text("#notice"))
 
         admin.click("button[data-tab=mailbox]")

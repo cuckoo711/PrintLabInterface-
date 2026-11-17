@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from .. import db
 from ..security import require_admin
+from .. import settings_store
 from . import model_card, store
 from .gateway import Gateway, GatewayError
 from .model_ref import ModelRefError, parse
@@ -142,6 +143,36 @@ def put_override(prefix: str, model: str, body: OverrideIn, request: Request):
     finally:
         conn.close()
     return _gateway(request).card_for(f"{prefix}:{model}").as_dict()
+
+
+class DefaultModelIn(BaseModel):
+    model: str = Field(default="", max_length=200)
+
+
+@router.get("/settings/default-model")
+def get_default_model(request: Request):
+    conn = _conn(request)
+    try:
+        return {"default_model": settings_store.get_default_model(conn),
+                "providers": [{"prefix": p["prefix"], "name": p["name"], "enabled": p["enabled"], "has_key": bool(p["keys"])}
+                              for p in store.list_providers(conn)]}
+    finally:
+        conn.close()
+
+
+@router.put("/settings/default-model")
+def put_default_model(body: DefaultModelIn, request: Request):
+    """Empty clears it. Anything else must name a provider that exists and is switched on."""
+    conn = _conn(request)
+    try:
+        try:
+            saved = settings_store.set_default_model(conn, body.model)
+        except settings_store.SettingError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        db.record_audit(conn, "admin", "default_model_set", "settings", "ok", saved or "(cleared)")
+        return {"default_model": saved}
+    finally:
+        conn.close()
 
 
 @router.post("/chat")

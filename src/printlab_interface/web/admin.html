@@ -60,6 +60,13 @@
 
   <section id="tab-providers" class="tab" aria-labelledby="h-providers">
     <h2 id="h-providers">供应商与密钥</h2>
+    <h3>默认模型</h3>
+    <p class="hint">聊天时不填“模型”框、角色文件也没指定模型，就用这里的。优先级：这次填的 > 角色文件里的 > 这里的默认。</p>
+    <form id="default-form" class="grid" autocomplete="off">
+      <label for="d-model">模型（前缀:模型名）</label><input id="d-model" maxlength="200" spellcheck="false" placeholder="例如 mimo:mimo-v2.6-flash">
+      <span></span><button type="submit">保存默认模型</button>
+    </form>
+    <p id="d-state" class="hint" role="status"></p>
     <p class="hint">密钥只能写入，页面和接口都不会再显示它。列表里只有最后几位的提示。</p>
     <div id="providers"></div>
     <h3>添加供应商</h3>

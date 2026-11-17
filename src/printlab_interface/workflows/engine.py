@@ -29,7 +29,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
-from .. import db
+from .. import db, settings_store
 from ..adapters.printlab.policy import PolicyError
 from ..adapters.printlab.runner import PrintLabRunner, RunnerError
 from ..agents.definition import AgentDefinition
@@ -249,7 +249,7 @@ class WorkflowEngine:
         conn = self._conn()
         try:
             row = self._row(conn, run_id)
-            return row["model"] or self.workflows[row["workflow"]].model
+            return row["model"] or self.workflows[row["workflow"]].model or settings_store.get_default_model(conn)
         finally:
             conn.close()
 

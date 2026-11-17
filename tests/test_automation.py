@@ -172,7 +172,7 @@ def test_bad_schedule_fields_are_rejected(sched, change):
 
 
 def test_an_agent_without_any_model_is_rejected(sched):
-    with pytest.raises(ScheduleError, match="no model"):
+    with pytest.raises(ScheduleError, match="没有模型"):
         sched.s.create({**AGENT_SPEC, "agent": "nomodel"})
     assert sched.s.create({**AGENT_SPEC, "agent": "nomodel", "model": "oa:x"})["model"] == "oa:x"
 
