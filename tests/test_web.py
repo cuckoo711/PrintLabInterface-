@@ -136,3 +136,17 @@ def test_workflow_lists_load_only_after_the_token_gate_is_passed():
     gate = code[code.index('$("gate-form").addEventListener'):]
     ok_at = gate.index('$("conn").classList.add("ok")')
     assert "loadWorkflows()" in gate[ok_at:ok_at + 200]
+
+
+@pytest.mark.parametrize("name,html,js", [("chat", HTML, JS), ("admin", (WEB / "admin.html").read_text(encoding="utf-8"), (WEB / "admin.js").read_text(encoding="utf-8"))])
+def test_both_pages_link_to_the_printlab_workbench_without_losing_the_token(name, html, js):
+    # Opened in a new tab: the token lives only in this page's memory, so navigating away would lose it.
+    link = re.search(r'<a id="to-printlab"[^>]*>', html)
+    assert link, name
+    assert 'target="_blank"' in link.group(0) and 'rel="noreferrer"' in link.group(0), name
+    # The address is set by the script (no inline script is allowed) and points at port 8018 on the page's own host.
+    assert '$("to-printlab").href = `${location.protocol}//${location.hostname}:8018/`' in js, name
+    assert "8018" not in html  # no hard-coded address in the markup
+    # Every link to another page opens in a new tab, for the same reason.
+    for tag in re.findall(r'<a [^>]*href="/(?:chat|admin)"[^>]*>', html):
+        assert 'target="_blank"' in tag and 'rel="noreferrer"' in tag, (name, tag)

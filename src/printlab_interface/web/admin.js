@@ -5,6 +5,10 @@ let token = "";
 
 const $ = (id) => document.getElementById(id);
 
+// The PrintLab workbench listens on port 8018 of the same machine. The host name is taken from this page so the link
+// also works when the page was opened by another name for this machine. Set here, not in the HTML: the page allows no inline script.
+$("to-printlab").href = `${location.protocol}//${location.hostname}:8018/`;
+
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(props)) {

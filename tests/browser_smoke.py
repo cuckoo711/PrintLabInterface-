@@ -289,6 +289,19 @@ stages:
         check("admin: no console errors other than the expected 401s", not [e for e in admin_errors if "401" not in e and "422" not in e], "; ".join(admin_errors[:3]))
         check("admin: every request went to the sidecar only", not admin_outside, str(admin_outside[:3]))
 
+        # --- links between the pages ---
+        check("chat: links to the PrintLab workbench on 8018 in a new tab",
+              page.get_attribute("#to-printlab", "href") == "http://127.0.0.1:8018/" and page.get_attribute("#to-printlab", "target") == "_blank")
+        check("chat: links to the admin page in a new tab", page.get_attribute("a[href='/admin']", "target") == "_blank")
+        check("admin: links to the PrintLab workbench on 8018 and to the chat page, both in new tabs",
+              admin.get_attribute("#to-printlab", "href") == "http://127.0.0.1:8018/" and admin.get_attribute("#to-printlab", "target") == "_blank"
+              and admin.get_attribute("a[href='/chat']", "target") == "_blank")
+        with page.context.expect_page() as opened:
+            page.click("a[href='/admin']")
+        check("chat: the admin link opens the admin page and leaves this page (and its token) alone",
+              opened.value.url.endswith("/admin") and page.is_visible("#app") and page.is_visible("#chat"))
+        opened.value.close()
+
         # --- browser-level security signals ---
         check("zero Content-Security-Policy violations", not page.evaluate("window.__csp || []"), str(page.evaluate("window.__csp || []")))
         # Exactly one error is expected: the 401 from the deliberately wrong token. Anything else is a defect.
