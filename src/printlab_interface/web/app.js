@@ -60,32 +60,15 @@ async function createProject(fields) {
 
 const json = async (path, options) => (await api(path, options)).json();
 
-function addMessage(kind, text) {
-  if (kind === "assistant" && text.includes("```printlab-project")) {
-    const parts = Proposal.split(text);
-    if (parts.some((part) => part.proposal)) {
-      let last = null;
-      for (const part of parts) {
-        if (part.proposal) {
-          const card = Proposal.card(part.proposal, createProject);
-          $("log").appendChild(card);
-          last = card;
-        } else if (part.text.trim()) {
-          last = addMessage("assistant", part.text.trim());
-        }
-      }
-      $("log").scrollTop = $("log").scrollHeight;
-      return last;
-    }
-  }
-  const node = document.createElement("div");
-  node.className = "msg " + kind;
-  node.textContent = text; // never innerHTML: model and tool text are untrusted
-  const log = $("log");
-  log.appendChild(node);
-  log.scrollTop = log.scrollHeight;
-  return node;
-}
+// Everything shown in the conversation goes through the thread view (thread.js), which builds it as text and keeps only a
+// window of a long conversation on the page.
+Thread.init({
+  log: $("log"), note: $("older"), jump: $("jump"), announce: $("announce"),
+  makeCard: (proposal) => Proposal.card(proposal, createProject),
+  // the conversation that is open when the page asks; thread.js drops the answer if another one was opened meanwhile
+  fetchOlder: (before) => json(`/api/sessions/${encodeURIComponent(currentSession)}/messages?before=${encodeURIComponent(before)}&limit=40`),
+});
+const addMessage = (kind, text) => Thread.add(kind, text);
 
 function setState(text, isError = false) {
   const state = $("state");
@@ -132,8 +115,7 @@ async function loadSessions() {
 async function openSession(id) {
   const data = await json("/api/sessions/" + encodeURIComponent(id));
   currentSession = id;
-  $("log").replaceChildren();
-  for (const message of data.messages) addMessage(message.role, message.content);
+  Thread.load(data.messages, data.has_more);
   if ([...$("agent").options].some((o) => o.value === data.agent)) $("agent").value = data.agent;
   await loadSessions();
 }
@@ -141,7 +123,7 @@ async function openSession(id) {
 async function newSession() {
   const created = await json("/api/sessions", { method: "POST", body: JSON.stringify({ agent: $("agent").value }) });
   currentSession = created.id;
-  $("log").replaceChildren();
+  Thread.reset();
   await loadSessions();
 }
 
@@ -175,6 +157,7 @@ async function send(text) {
   setBusy(true);
   setState("运行中…");
   abortController = new AbortController();
+  let writing = null; // the reply being written, while pieces of it arrive
   try {
     const body = { message: text };
     const model = $("model").value.trim();
@@ -186,8 +169,12 @@ async function send(text) {
       if (name === "start") { currentRun = data.run_id; $("cancel").disabled = false; }
       else if (name === "tool_call") setState("调用工具：" + data.name);
       else if (name === "tool_result") addMessage("tool", `${data.name}：${data.refused ? "被拒绝" : data.ok ? "完成" : "失败"}`);
-      else if (name === "text" && data.text) addMessage("assistant", data.text);
-      else if (name === "end") {
+      else if (name === "text_delta" && data.text) (writing = writing || Thread.beginStream()).append(data.text);
+      else if (name === "text" && data.text) {
+        // the whole reply is the truth: it replaces what the pieces added up to
+        if (writing) { writing.finish(data.text); writing = null; } else addMessage("assistant", data.text);
+      } else if (name === "end") {
+        if (writing) { writing.cut(); writing = null; } // stopped or failed before the reply was whole
         if (data.status === "done") setState(`完成（${data.turns} 轮，${data.tool_calls} 次工具调用，${(data.usage || {}).total_tokens || 0} tokens）`);
         else setState(`结束：${data.status}${data.error ? "（" + data.error + "）" : ""}`, data.status !== "cancelled");
       }
@@ -196,6 +183,7 @@ async function send(text) {
     if (error.name === "AbortError") setState("已断开");
     else { addMessage("error", "出错：" + error.message); setState("出错", true); }
   } finally {
+    if (writing) writing.cut();
     currentRun = null;
     abortController = null;
     setBusy(false);

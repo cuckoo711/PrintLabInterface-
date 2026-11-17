@@ -223,3 +223,45 @@ def test_the_same_proposal_always_gets_the_same_id():
     assert "function idFor(p)" in PROPOSAL_JS
     body = PROPOSAL_JS[PROPOSAL_JS.index("function idFor(p)"):PROPOSAL_JS.index("function el(")]
     assert "JSON.stringify([p.name, p.kind, p.brief])" in body
+
+
+THREAD_JS = (WEB / "thread.js").read_text(encoding="utf-8")
+
+
+def test_the_conversation_view_only_builds_text_and_makes_no_requests_of_its_own():
+    code = re.sub(r"//[^\n]*", "", THREAD_JS)
+    for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "localStorage", "sessionStorage",
+                   "document.cookie", "location.", "fetch(", "XMLHttpRequest", "WebSocket", "console.log", "document.title"):
+        assert banned not in code, banned
+    # text only: every message body is set through textContent / a text node's data
+    assert "textContent = entry.text" in code and ".data = text" in code
+    # the older pages come from the function the page hands in, not from an address built in here
+    assert "fetchOlder(" in code and "/api/" not in code
+
+
+def test_the_conversation_view_is_listed_in_the_page_and_served_like_the_other_scripts(client):
+    assert HTML.index("/chat/proposal.js") < HTML.index("/chat/thread.js") < HTML.index("/chat/app.js")  # it uses Proposal; app.js uses it
+    r = client.get("/chat/thread.js")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/javascript")
+    assert "unsafe-inline" not in r.headers["content-security-policy"] and r.headers["cache-control"] == "no-store"
+
+
+def test_only_a_window_of_a_long_conversation_is_kept_on_the_page():
+    assert "const MAX_MOUNTED = 60" in THREAD_JS and "unmount(" in THREAD_JS and "function trim()" in THREAD_JS
+    # a piece of streamed text changes one element, at most once per frame
+    assert "requestAnimationFrame" in THREAD_JS and "setInterval" not in THREAD_JS and "setTimeout" not in THREAD_JS
+
+
+def test_the_page_does_not_scroll_and_the_conversation_does():
+    assert 'class="fixed"' in HTML and "body.fixed { height: 100vh; height: 100dvh; overflow: hidden; }" in CSS
+    assert "#log { position: absolute; inset: 0; overflow-y: auto;" in CSS
+    assert 'id="jump"' in HTML and 'id="older"' in HTML and 'aria-live="off"' in HTML  # letters are not read out one by one
+    assert 'id="announce"' in HTML and 'aria-live="polite"' in HTML
+
+
+def test_the_chat_script_streams_into_one_element_and_lets_the_whole_reply_win():
+    code = re.sub(r"//[^\n]*", "", JS)
+    assert '"text_delta"' in code and "Thread.beginStream()" in code
+    # the whole reply replaces what the pieces added up to; a cut reply is marked, never dropped
+    assert "writing.finish(data.text)" in code and "writing.cut()" in code
+    assert "/messages?before=" in code and "limit=40" in code

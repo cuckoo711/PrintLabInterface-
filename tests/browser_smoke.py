@@ -373,6 +373,99 @@ stages:
         check("proposal: a block with an unknown field, or a name with <> in it, is not turned into a card", page.locator(".proposal").count() == 1 and len(made) == 1)
         check("proposal: such a block stays visible as plain text so the person can see what was said", "printlab-project" in shown and "approve" in shown)
 
+        # --- a long conversation: fixed sidebar, one scrolling area, a window of messages, older pages on demand ---
+        from printlab_interface.agents import sessions as sessions_mod
+        seed = db.connect(settings.db_path); sessions_mod.init(seed)
+        long_chat = sessions_mod.create(seed, "helper")
+        for i in range(150):
+            sessions_mod.add_message(seed, long_chat.id, "user" if i % 2 == 0 else "assistant", f"消息 {i} " + "文字内容" * 30)
+        seed.close()
+        older_requests: list[str] = []
+        page.on("request", lambda r: older_requests.append(r.url) if "/messages?before=" in r.url else None)
+        page.reload(); page.wait_for_selector("#app:not([hidden])", timeout=8000)
+        page.locator("#sessions button").first.click()
+        expect(page.locator("#thread .msg").last).to_contain_text("消息 149 ", timeout=8000)
+        mounted = lambda: page.locator("#thread .msg").count()
+        check("long chat: only the newest page is loaded and shown at first", mounted() == 40, str(mounted()))
+        side_top = page.evaluate("document.querySelector('aside').getBoundingClientRect().top")
+        check("long chat: the page itself does not scroll, the conversation is the one scrolling area",
+              page.evaluate("document.scrollingElement.scrollHeight <= innerHeight + 1") and page.evaluate("document.getElementById('log').scrollHeight > document.getElementById('log').clientHeight + 500"))
+        page.evaluate("document.getElementById('log').scrollTop = 0")
+        page.wait_for_timeout(600)
+        check("long chat: the sidebar stays where it is while the conversation scrolls",
+              page.evaluate("document.querySelector('aside').getBoundingClientRect().top") == side_top and page.evaluate("scrollY") == 0)
+        seen_most = 0
+        for _ in range(60):
+            page.evaluate("document.getElementById('log').scrollTop = 0")
+            page.wait_for_timeout(180)
+            seen_most = max(seen_most, mounted())
+            if "消息 0 " in page.locator("#thread .msg").first.inner_text():
+                break
+        page.wait_for_timeout(400)
+        check("long chat: scrolling up reaches the very first message, loaded in pages", "消息 0 " in page.locator("#thread .msg").first.inner_text() and len(older_requests) >= 3, f"{len(older_requests)} requests")
+        check("long chat: far fewer than 150 messages are ever on the page at once", 0 < seen_most <= 80 and mounted() <= 60, f"most {seen_most}, now {mounted()}")
+        check("long chat: the button back to the newest appears when scrolled away", page.is_visible("#jump"))
+        page.click("#jump")
+        expect(page.locator("#thread .msg").last).to_contain_text("消息 149 ", timeout=5000)
+        check("long chat: the button returns to the newest message and hides itself",
+              page.evaluate("(() => { const l = document.getElementById('log'); return l.scrollHeight - l.scrollTop - l.clientHeight <= 80; })()") and not page.is_visible("#jump"))
+
+        # --- a reply that is written piece by piece ---
+        release = threading.Event()
+
+        def slow_stream(first, rest):
+            def piece(text, finish=None):
+                return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text, tool_calls=None), finish_reason=finish)], usage=None)
+            yield piece(first)
+            release.wait(10)
+            for part in rest[:-1]:
+                yield piece(part)
+            yield piece(rest[-1], "stop")
+            yield SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=3, completion_tokens=4, total_tokens=7))
+
+        script_of_replies.clear(); release.clear()
+        script_of_replies.append(slow_stream("第一段，<img src=x onerror=window.__pwned=1>", ["第二段，", "结束。"]))
+        assistants_before = page.locator("#thread .msg.assistant").count()
+        page.fill("#message", "写一个流式回复"); page.press("#message", "Control+Enter")
+        live = page.locator("#thread .msg.streaming")
+        expect(live).to_contain_text("第一段，", timeout=10000)
+        check("stream: the first words are on the page while the reply is still being written", "运行中" in page.inner_text("#state") and live.count() == 1)
+        check("stream: the reply is one element that is still growing, not one per piece", page.locator("#thread .msg.assistant").count() == assistants_before + 1)
+        check("stream: streamed text is shown as text, never as markup", page.locator("#thread img").count() == 0 and page.evaluate("window.__pwned") is None)
+        handle = live.element_handle()
+        page.evaluate("document.getElementById('log').scrollTop = document.getElementById('log').scrollTop - 900")
+        page.wait_for_timeout(300)
+        away = page.evaluate("(() => { const l = document.getElementById('log'); return l.scrollHeight - l.scrollTop - l.clientHeight; })()")
+        release.set()
+        page.wait_for_timeout(200)
+        expect(page.locator("#state")).to_contain_text("完成", timeout=10000)
+        check("stream: the same element received the rest, and the stored reply is the whole text",
+              handle.evaluate("e => e.textContent") == "第一段，<img src=x onerror=window.__pwned=1>第二段，结束。" and page.locator("#thread .msg.streaming").count() == 0)
+        after = page.evaluate("(() => { const l = document.getElementById('log'); return l.scrollHeight - l.scrollTop - l.clientHeight; })()")
+        check("stream: someone who scrolled up is not pulled back down by new text, and is offered the way back",
+              away > 200 and after > 200 and page.is_visible("#jump"), f"{away} {after}")
+        page.click("#jump")
+        check("stream: the way back lands on the newest words", "结束。" in page.locator("#thread .msg").last.inner_text())
+        page.fill("#message", "x"); page.locator("#message").fill("")
+        stored = page.evaluate("fetch(document.querySelector('#sessions [aria-current=true]') ? '/api/sessions?limit=1' : '/api/sessions?limit=1').then(r => r.status)")
+        check("stream: the request that served the page is still authorised after a long reply", stored == 200, str(stored))
+
+        # a reply that is stopped halfway keeps what was written and says it was cut
+        script_of_replies.clear(); release.clear()
+        script_of_replies.append(slow_stream("写到一半", ["不会显示", "不会显示"]))
+        page.fill("#message", "再写一个"); page.press("#message", "Control+Enter")
+        expect(page.locator("#thread .msg.streaming")).to_contain_text("写到一半", timeout=10000)
+        expect(page.locator("#cancel")).to_be_enabled(timeout=5000)
+        with page.expect_response(lambda r: "/cancel" in r.url) as cancelled:
+            page.click("#cancel")  # the cancel request must reach the server while the reply is still being written
+        check("stream: the cancel request is accepted while the reply is still being written", cancelled.value.status == 200, str(cancelled.value.status))
+        release.set()
+        expect(page.locator("#state")).to_contain_text("cancelled", timeout=10000)
+        cut = page.locator("#thread .msg.cut")
+        check("stream: a stopped reply keeps the words written so far, marked as cut",
+              cut.count() == 1 and cut.first.inner_text() == "写到一半" and page.locator("#thread .msg.streaming").count() == 0)
+        page.click("#new-session")
+
         # --- hand-off of a draft from the PrintLab workbench ---
         draft_page = context.new_page()
         draft_page.goto(base + "/chat#draft=" + "%E6%83%B3%E5%81%9A%3A%20%26%20%3Cb%3Ex%3C%2Fb%3E%20100%25%0A%E7%AC%AC%E4%BA%8C%E8%A1%8C" + "%07%1B")

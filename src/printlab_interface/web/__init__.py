@@ -14,6 +14,7 @@ _FILES = {
     "app.js": ("app.js", "text/javascript; charset=utf-8"),
     "login.js": ("login.js", "text/javascript; charset=utf-8"),
     "proposal.js": ("proposal.js", "text/javascript; charset=utf-8"),
+    "thread.js": ("thread.js", "text/javascript; charset=utf-8"),
     "admin": ("admin.html", "text/html; charset=utf-8"),
     "admin.js": ("admin.js", "text/javascript; charset=utf-8"),
 }
@@ -73,6 +74,11 @@ def admin_css() -> Response:
 @router.get("/chat/login.js", include_in_schema=False)
 def login_js() -> Response:
     return _serve("login.js")
+
+
+@router.get("/chat/thread.js", include_in_schema=False)
+def thread_js() -> Response:
+    return _serve("thread.js")
 
 
 @router.get("/chat/proposal.js", include_in_schema=False)

@@ -58,15 +58,27 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 code.big { display: block; font-size: 20px; padding: 16px; margin-top: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--faint); user-select: all; overflow-wrap: anywhere; letter-spacing: .02em; }
 
 /* the chat page: sidebar and stage, like the workbench */
-main { flex: 1; display: grid; grid-template-columns: 280px 1fr; min-height: 0; }
+/* The page does not scroll: the sidebar stays where it is and the conversation is the one scrolling area. */
+body.fixed { height: 100vh; height: 100dvh; overflow: hidden; }
+body.fixed #gate { overflow: auto; max-height: calc(100dvh - 120px); }
+main { flex: 1; display: grid; grid-template-columns: 280px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; }
 aside { display: flex; flex-direction: column; gap: 6px; padding: 20px 20px 28px; border-right: 1px solid var(--line); background: var(--sidebar); overflow: auto; }
 aside h2:first-of-type { margin-top: 24px; }
 #sessions, #wf-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 #sessions button, #wf-runs button { width: 100%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400; font-size: 13px; padding: 9px 12px; border-color: transparent; }
 #sessions button[aria-current="true"], #wf-runs button[aria-current="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-#chat { display: flex; flex-direction: column; min-height: 0; padding: 24px 40px 20px; gap: 14px; max-width: 1100px; width: 100%; margin: 0 auto; }
-#log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 12px; min-height: 240px; }
-.msg { padding: 12px 16px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 88%; line-height: 1.7; animation: rise .18s ease-out; }
+#chat { display: flex; flex-direction: column; min-height: 0; padding: 0 40px 20px; gap: 14px; max-width: 1100px; width: 100%; margin: 0 auto; }
+#stage { position: relative; flex: 1; min-height: 0; }
+#log { position: absolute; inset: 0; overflow-y: auto; overflow-anchor: none; padding: 24px 6px 8px 0; scrollbar-gutter: stable; }
+#log:focus-visible { outline-offset: -2px; }
+#thread { display: flex; flex-direction: column; gap: 12px; min-height: 100%; justify-content: flex-end; }
+.spacer { flex: none; width: 1px; }
+.older { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); margin: 0; z-index: 2; font-size: 12px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px; }
+#jump { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 2; min-height: 34px; font-size: 13px; padding: 4px 16px; border-radius: 999px; background: var(--panel); box-shadow: 0 4px 16px rgba(0, 0, 0, .14); }
+.msg { padding: 12px 16px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 88%; line-height: 1.7; }
+.msg.fresh { animation: rise .18s ease-out; }
+.msg.streaming::after { content: ""; display: inline-block; width: 7px; height: 1.05em; margin-left: 3px; vertical-align: text-bottom; background: var(--accent); border-radius: 2px; animation: blink 1s steps(2, start) infinite; }
+.msg.cut::after { content: "（回复被中断）"; color: var(--muted); font-size: 12px; margin-left: 8px; }
 .msg.user { background: var(--accent-soft); align-self: flex-end; }
 .msg.assistant { background: var(--panel); border: 1px solid var(--line); align-self: flex-start; }
 .msg.tool { font-size: 12px; color: var(--muted); background: transparent; border: 1px dashed var(--line); align-self: flex-start; padding: 6px 12px; }
@@ -118,12 +130,15 @@ ul.plain li { display: flex; gap: 10px; align-items: center; justify-content: sp
 table { border-collapse: collapse; width: 100%; font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
 th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 8px 10px; overflow-wrap: anywhere; } th { color: var(--muted); font-weight: 500; letter-spacing: .04em; }
 
+@keyframes blink { to { visibility: hidden; } }
 @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (max-width: 760px) {
   header { padding: 0 16px; height: 56px; }
-  main { grid-template-columns: 1fr; }
+  body.fixed { height: auto; overflow: visible; }
+  main { grid-template-columns: 1fr; grid-template-rows: none; }
   aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  #stage { flex: none; height: 62vh; }
   #chat, #wf-panel { padding: 16px; }
   #admin { padding: 20px 16px 40px; }
   .grid { grid-template-columns: 1fr; } .grid textarea { grid-column: 1; }

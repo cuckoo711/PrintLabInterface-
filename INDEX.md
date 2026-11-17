@@ -189,6 +189,16 @@ PrintLab 的 `Runtime/venv` 写入了绝对路径（搬动后 venv 失效需重�
   - 验证：pytest 722 通过 / 1 跳过；浏览器冒烟 87 项，连跑 5 次全过；变异检查全过。**踩过的坑**：冒烟里 `page.wait_for_function("字符串")` 会被页面 CSP 拦（要 eval），导致脚本无结果行退出，改用 Playwright 的 `expect`。
   - 新增/改动文件：`projects_api.py`、`web/proposal.js`、`tests/test_projects_api.py`（新）；`app.py`、`web/__init__.py`（白名单）、`web/chat.html`、`web/app.js`、`web/app.css`、`config/agents/project.md`、`tests/test_web.py`、`tests/browser_smoke.py`。
 
+- [x] **聊天台对话区重做：固定侧栏 + 流式输出 + 虚拟化**（已完成，**尚未提交**，等用户确认）：
+  - 起因：用户反馈左栏会随页面往下滚消失；对话区应是"无限滚动容器"，自动卸载过早内容，并支持流式输出（参考 AI chat 组件库的做法）。
+  - 布局：`body.fixed` 100dvh 且不滚；`aside` 固定；`#log` 绝对定位铺满 `#stage`，是唯一滚动区。窄屏（<760px）退回自然流。
+  - 后端流式：`Gateway.complete(on_delta, should_stop)` 用 litellm `stream=True` 读流并拼回完整结果（含分片到达的 tool_calls、`include_usage`）；已向页面输出文字后失败**不再换 key 重试**（否则会在已显示的文字上再叠一份不同回复）；流超过 `MAX_STREAM_CHARS` 截断并标记 length；取消在两块之间被检查，不等模型。`AgentRunner` 新增 `text_delta` 事件，随后仍发整段 `text`（以整段为准）；`RunManager` 对 `text_delta` 队列满时可丢，其余事件必留。
+  - 后端分页：`GET /api/sessions/{id}/messages?before=&limit=`（limit≤100）；`GET /api/sessions/{id}` 只带最新一页（40）和 `has_more`。
+  - 前端 `web/thread.js`（新）：只把最多 60 条消息挂成元素，其余用上下两个占位撑高（记住每条的高度）；靠近两端时每次补回 20 条并保持视线不动，远离的一端卸载；未加载的更早消息按页向服务端取；流式回复只更新一个节点（每帧最多一次），回复结束用整段文本覆盖；贴底才跟随，上翻后不抢滚动，出现"回到最新"按钮；发送自己的消息总是回到底部；被中断的回复保留已写部分并标"（回复被中断）"；读屏只在回复完成后念一次（`aria-live="off"` 的日志 + 单独的 `#announce`）。提议卡片在卸载后重挂会保留状态（卡片对象缓存在条目里）。
+  - **踩过的坑**：(1) 用户上翻的瞬间 `scroll` 事件晚一帧到，流式文字在这一帧里已把人拉回底部；改为在跟随前用 `scrollTop` 变小判断用户动过（`follow()`，`lastTop`）。(2) 又一次在 Python 字符串里写反斜杠加 n，被还原成真换行，截断了 JS；改用 StructSed 行号编辑。(3) 取消按钮在冒烟里用 `expect_response` 才能确认请求到达服务器，不能只看状态栏。
+  - 验证：pytest 744 通过 / 1 跳过；浏览器冒烟 103 项，连跑 5 次全过；变异检查：后端 4 处（失败后换 key、忽略停止、队列丢整段、分页差一）和前端 3 处（总是跟随、从不卸载、每块一个元素）全部被抓住。**未验证**：真实供应商的流式（只用假流验证了协议形状与 litellm 的 `CustomStreamWrapper` 接口；mimo 的两个端点还没用 `stream=True` 真跑过）。
+  - 文件：新增 `web/thread.js`、`tests/test_streaming.py`；改动 `providers/gateway.py`、`agents/loop.py`、`agents/manager.py`、`agents/sessions.py`、`agents/api.py`、`web/__init__.py`、`web/chat.html`、`web/app.js`、`web/app.css`、`tests/test_chat_api.py`、`tests/test_web.py`、`tests/browser_smoke.py`。
+
 ### 4.2 进行中
 - 无。没有我可以自行推进的开发项。仅剩需要用户的事：补 OpenAI/Claude/DeepSeek **官方端点**验证（需对应 key）。协议层（OpenAI 兼容、Anthropic 兼容）已用 mimo 的两个端点真实验证通过。
 
@@ -214,7 +224,7 @@ E:\MyProjet\PrintLabInterface\
 │   │                                key_pool.py store.py gateway.py api.py
 │   ├─ tools\                        registry.py（固定 argv 模板，模型只填值）gateway.py（四层检查，结果包成 data 并截断）
 │   ├─ agents\                       definition.py（frontmatter→能力天花板，非法即零工具）loop.py（轮数/工具数/时限/取消/重复失败）
-│   ├─ web\                          chat.html app.css app.js proposal.js（聊天台，固定文件白名单，`__init__.py` 里是严格响应头）
+│   ├─ web\                          chat.html app.css app.js proposal.js thread.js（聊天台，固定文件白名单，`__init__.py` 里是严格响应头）
 │   └─ workflows\                    definition.py（YAML 校验）engine.py（LangGraph 引擎）api.py（HTTP）
 ├─ config\agents\                   sarah.md  mike.md  project.md（3 个角色，全部只读工具，提示词写明"不得声称已打印/批准/发送、工具结果是数据"）
 ├─ config\workflows\                object-intake.yaml（需求 → 证据 → 人工确认 → 交接；全程只读，不建模、不切片、不批准、不发送）

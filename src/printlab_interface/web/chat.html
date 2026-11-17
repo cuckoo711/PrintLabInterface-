@@ -7,7 +7,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/chat/app.css">
 </head>
-<body>
+<body class="fixed">
 <header>
   <h1>PrintLabInterface</h1>
   <span id="conn" class="pill">未连接</span>
@@ -88,7 +88,12 @@
     <div id="wf-outputs"></div>
   </section>
   <section id="chat">
-    <div id="log" role="log" aria-live="polite"></div>
+    <div id="stage">
+      <div id="log" role="log" aria-live="off" aria-label="对话" tabindex="0"></div>
+      <p id="older" class="older" hidden>正在加载更早的消息…</p>
+      <button id="jump" type="button" class="quiet" hidden>回到最新</button>
+    </div>
+    <div id="announce" class="sr" aria-live="polite"></div>
     <form id="composer" autocomplete="off">
       <label for="message" class="sr">消息</label>
       <textarea id="message" rows="3" maxlength="8000" placeholder="输入消息，Ctrl+Enter 发送" required></textarea>
@@ -102,6 +107,7 @@
 </main>
 <script src="/chat/login.js"></script>
 <script src="/chat/proposal.js"></script>
+<script src="/chat/thread.js"></script>
 <script src="/chat/app.js"></script>
 </body>
 </html>
